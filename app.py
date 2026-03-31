@@ -52,6 +52,18 @@ SEGMENT_COLORS = {
 
 # ── AUTH ──────────────────────────────────────────────────────────────────────
 def get_credentials():
+    import base64, json, tempfile
+    from google.oauth2.credentials import Credentials
+
+    # ── Streamlit Cloud: load from secrets ───────────────────────────────────
+    if hasattr(st, "secrets") and "token_pickle_b64" in st.secrets:
+        token_bytes = base64.b64decode(st.secrets["token_pickle_b64"])
+        creds = pickle.loads(token_bytes)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        return creds
+
+    # ── Local: load from token.pickle / credentials.json ─────────────────────
     creds = None
     if os.path.exists("token.pickle"):
         with open("token.pickle", "rb") as f:
