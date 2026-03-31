@@ -27,6 +27,7 @@ PORTFOLIO = [
     {"name": "Shooting Star Lodge",     "ga4_id": "480184188", "domain": "shootingstarlodge.com","keywords": ["shooting star lodge","shooting star","shootingstarlodge"]},
     {"name": "Luffu Club",              "ga4_id": "513226281", "domain": "luffuclub.com",         "keywords": ["luffu","luffu club","luffuclub"]},
     {"name": "Yo1 Luxury Resorts",      "ga4_id": "342014736", "domain": "yo1.com",              "keywords": ["yo1","yo1 luxury","yo1 resorts","yo1.com"]},
+    {"name": "Dolphin Group of Hotels", "ga4_id": "514756369", "domain": "hoteldolphin.in",      "keywords": ["dolphin","dolphin hotel","hotel dolphin","dolphin group","hoteldolphin"]},
 ]
 
 # Active property — overridden by sidebar selection
