@@ -15,6 +15,7 @@ from google.analytics.data_v1beta.types import (
 )
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 st.set_page_config(page_title="Customer Success Website Analytics Dashboard", layout="wide")
@@ -52,18 +53,35 @@ SEGMENT_COLORS = {
 
 # ── AUTH ──────────────────────────────────────────────────────────────────────
 def get_credentials():
-    import base64, json, tempfile
-    from google.oauth2.credentials import Credentials
+    """
+    Returns Google credentials using service account.
+    Priority:
+      1. Streamlit Cloud — reads service account JSON from st.secrets
+      2. Local — reads from service account JSON file on disk
+    Never expires. No browser login required.
+    """
+    import json
+
+    sa_scopes = [
+        "https://www.googleapis.com/auth/analytics.readonly",
+        "https://www.googleapis.com/auth/webmasters.readonly",
+    ]
 
     # ── Streamlit Cloud: load from secrets ───────────────────────────────────
-    if hasattr(st, "secrets") and "token_pickle_b64" in st.secrets:
-        token_bytes = base64.b64decode(st.secrets["token_pickle_b64"])
-        creds = pickle.loads(token_bytes)
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        return creds
+    if hasattr(st, "secrets") and "service_account_json" in st.secrets:
+        sa_info = json.loads(st.secrets["service_account_json"])
+        return service_account.Credentials.from_service_account_info(
+            sa_info, scopes=sa_scopes
+        )
 
-    # ── Local: load from token.pickle / credentials.json ─────────────────────
+    # ── Local: load from service account JSON file ───────────────────────────
+    sa_file = "cs-analytics-link-b5e07310a9fe.json"
+    if os.path.exists(sa_file):
+        return service_account.Credentials.from_service_account_file(
+            sa_file, scopes=sa_scopes
+        )
+
+    # ── Fallback: original OAuth flow (local dev without service account) ────
     creds = None
     if os.path.exists("token.pickle"):
         with open("token.pickle", "rb") as f:
