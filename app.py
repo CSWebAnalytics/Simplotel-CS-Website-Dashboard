@@ -1325,7 +1325,7 @@ st.markdown("---")
 # ════════════════════════════════════════════════════════════════════
 # DECK METRICS
 # ════════════════════════════════════════════════════════════════════
-st.markdown("## Deck Metrics")
+st.markdown(f"## Deck Metrics — {PROPERTIES[selected_label]['name']}")
 st.caption(
     "Fixed date windows — independent of the date selector above. "
     "Year-on-Year charts: 2022 to present. "
