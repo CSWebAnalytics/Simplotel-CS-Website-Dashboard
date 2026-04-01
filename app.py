@@ -2372,19 +2372,45 @@ def interpret_query(user_query, api_key, property_name, start_str, end_str):
     }
     """
     client = Groq(api_key=api_key)
+    today_str = str(date.today())
     prompt = f"""You are a data fetching assistant for a hotel website analytics dashboard.
 The active property is: {property_name}
-Date range for the query: {start_str} to {end_str}
+Today's date: {today_str}
+Default date range: {start_str} to {end_str}
 
 {GA4_SCHEMA}
 
-Interpret the user request and return ONLY a valid JSON object — no markdown, no explanation:
+Interpret the user request and return ONLY a valid JSON object — no markdown, no explanation.
+
+If the query asks for a COMPARISON between two periods (e.g. "Q1 2026 vs Q1 2025", "this year vs last year",
+"January vs December"), include BOTH date ranges using "date_ranges" as a list of objects with "start" and "end".
+Otherwise use a single "date_range" object.
+
+Example for comparison query:
+{{
+  "source": "ga4",
+  "title": "Organic Traffic Q1 2026 vs Q1 2025",
+  "chart_type": "bar",
+  "x_axis": "month",
+  "y_axis": "sessions",
+  "is_comparison": true,
+  "date_ranges": [
+    {{"label": "Q1 2026", "start": "2026-01-01", "end": "2026-03-31"}},
+    {{"label": "Q1 2025", "start": "2025-01-01", "end": "2025-03-31"}}
+  ],
+  "ga4": {{"dimensions": ["year","month"], "metrics": ["sessions"], "order_by_metric": "sessions", "order_desc": false, "limit": 25, "filter_channel": "Organic Search"}},
+  "gsc": {{"dimensions": ["query"], "row_limit": 25, "order_by": "clicks"}}
+}}
+
+Example for single period query:
 {{
   "source": "ga4",
   "title": "short title",
   "chart_type": "bar",
   "x_axis": "column_name",
   "y_axis": "column_name",
+  "is_comparison": false,
+  "date_range": {{"start": "{start_str}", "end": "{end_str}"}},
   "ga4": {{"dimensions": ["sessionDefaultChannelGroup"], "metrics": ["sessions"], "order_by_metric": "sessions", "order_desc": true, "limit": 25, "filter_channel": null}},
   "gsc": {{"dimensions": ["query"], "row_limit": 25, "order_by": "clicks"}}
 }}
@@ -2395,6 +2421,8 @@ Rules:
 - For breakdowns: chart_type="bar"
 - For keywords: source="gsc"
 - filter_channel maps to GA4 channel group e.g. "Organic Search", "Direct", "Paid Search"
+- For comparisons: always use is_comparison=true and include both periods in date_ranges
+- Always infer exact dates from the query. Q1 = Jan-Mar, Q2 = Apr-Jun, Q3 = Jul-Sep, Q4 = Oct-Dec
 - Return ONLY the JSON. No markdown fences.
 
 User request: {user_query}"""
@@ -2617,20 +2645,39 @@ if run_query:
                     PROPERTIES[selected_label]["name"],
                     q_start, q_end
                 )
-                source = instruction.get("source", "ga4")
-                if source == "gsc":
-                    if not gsc_available:
-                        st.error("Google Search Console is not configured for this property.")
-                    else:
-                        df_result = execute_gsc_query(instruction, q_start, q_end)
+                source      = instruction.get("source", "ga4")
+                is_comp     = instruction.get("is_comparison", False)
+                date_ranges = instruction.get("date_ranges", [])
+
+                if is_comp and date_ranges:
+                    # Fetch each period separately and merge with a period label column
+                    frames = []
+                    for dr in date_ranges:
+                        if source == "gsc":
+                            df_p = execute_gsc_query(instruction, dr["start"], dr["end"])
+                        else:
+                            df_p = execute_ga4_query(instruction, dr["start"], dr["end"])
+                        if not df_p.empty:
+                            df_p.insert(0, "Period", dr.get("label", f"{dr['start']} to {dr['end']}"))
+                            frames.append(df_p)
+                    df_result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
                 else:
-                    df_result = execute_ga4_query(instruction, q_start, q_end)
+                    # Single period — use date_range from instruction or fallback
+                    dr = instruction.get("date_range", {"start": q_start, "end": q_end})
+                    if source == "gsc":
+                        if not gsc_available:
+                            st.error("Google Search Console is not configured for this property.")
+                            df_result = pd.DataFrame()
+                        else:
+                            df_result = execute_gsc_query(instruction, dr["start"], dr["end"])
+                    else:
+                        df_result = execute_ga4_query(instruction, dr["start"], dr["end"])
 
                 if df_result.empty:
                     st.warning("No data returned for this query and date range.")
                 else:
                     title = instruction.get("title", user_query[:60])
-                    # Generate text insight
+                    # Generate text insight — pass full data including both periods
                     with st.spinner("Generating insight..."):
                         try:
                             text_insight = generate_text_insight(
