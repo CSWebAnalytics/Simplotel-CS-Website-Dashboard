@@ -1526,6 +1526,70 @@ def get_credentials():
             pickle.dump(creds, f)
     return creds
 
+
+def get_fallback_credentials():
+    """
+    Returns SECONDARY service account credentials for overflow properties.
+    Used when the primary service account hits Google's accounts-per-user limit.
+    Priority:
+      1. Streamlit Cloud — reads service_account_json_2 from st.secrets
+      2. Local — reads from second service account JSON file on disk
+    """
+    sa_scopes = [
+        "https://www.googleapis.com/auth/analytics.readonly",
+        "https://www.googleapis.com/auth/webmasters.readonly",
+    ]
+    try:
+        if hasattr(st, "secrets") and "service_account_json_2" in st.secrets:
+            sa_info = json.loads(st.secrets["service_account_json_2"])
+            return service_account.Credentials.from_service_account_info(
+                sa_info, scopes=sa_scopes
+            )
+    except Exception:
+        pass
+    sa_file_2 = "cs-analytics-link-18eabe49b35f.json"
+    if os.path.exists(sa_file_2):
+        return service_account.Credentials.from_service_account_file(
+            sa_file_2, scopes=sa_scopes
+        )
+    return None
+
+# ── FALLBACK HELPERS — try primary, retry with secondary on PermissionDenied ─
+def _run_ga4_report(req):
+    """Run a GA4 report. On PermissionDenied, retry with the fallback service account."""
+    creds  = get_credentials()
+    client = BetaAnalyticsDataClient(credentials=creds)
+    try:
+        return client.run_report(req)
+    except Exception as e:
+        if _check_permission_error(e):
+            fb = get_fallback_credentials()
+            if fb:
+                try:
+                    return BetaAnalyticsDataClient(credentials=fb).run_report(req)
+                except Exception:
+                    pass
+            return None
+        raise
+
+def _run_gsc_query(site_url, body):
+    """Run a GSC query. On PermissionDenied, retry with the fallback service account."""
+    creds   = get_credentials()
+    service = build("searchconsole", "v1", credentials=creds)
+    try:
+        return service.searchanalytics().query(siteUrl=site_url, body=body).execute()
+    except Exception as e:
+        if _check_permission_error(e):
+            fb = get_fallback_credentials()
+            if fb:
+                try:
+                    service2 = build("searchconsole", "v1", credentials=fb)
+                    return service2.searchanalytics().query(siteUrl=site_url, body=body).execute()
+                except Exception:
+                    pass
+            return None
+        raise
+
 # ── DATA FUNCTIONS ────────────────────────────────────────────────────────────
 # Permission error flag — set True when service account lacks access to property
 _GA4_PERMISSION_ERROR = False
@@ -1536,23 +1600,18 @@ def _check_permission_error(e):
     err = str(e).lower()
     return "permissiondenied" in err or "permission denied" in err or "403" in err
 def get_ga4_data(start, end):
-    creds  = get_credentials()
-    client = BetaAnalyticsDataClient(credentials=creds)
     req = RunReportRequest(
         property=f"properties/{PROPERTY_ID}",
         date_ranges=[DateRange(start_date=str(start), end_date=str(end))],
         dimensions=[Dimension(name="sessionDefaultChannelGroup")],
         metrics=[Metric(name="sessions"), Metric(name="engagementRate"), Metric(name="bounceRate")]
     )
-    try:
-        resp = client.run_report(req)
-    except Exception as _e:
-        if _check_permission_error(_e):
-            global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
-            _GA4_PERMISSION_ERROR = True
-            _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
-            return pd.DataFrame()
-        raise
+    resp = _run_ga4_report(req)
+    if resp is None:
+        global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
+        _GA4_PERMISSION_ERROR = True
+        _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
+        return pd.DataFrame()
     rows = []
     for row in resp.rows:
         rows.append({
@@ -1564,23 +1623,18 @@ def get_ga4_data(start, end):
     return pd.DataFrame(rows).sort_values("sessions", ascending=False)
 
 def get_ga4_monthly_yoy():
-    creds  = get_credentials()
-    client = BetaAnalyticsDataClient(credentials=creds)
     req = RunReportRequest(
         property=f"properties/{PROPERTY_ID}",
         date_ranges=[DateRange(start_date="2022-01-01", end_date="today")],
         dimensions=[Dimension(name="year"), Dimension(name="month")],
         metrics=[Metric(name="sessions")]
     )
-    try:
-        resp = client.run_report(req)
-    except Exception as _e:
-        if _check_permission_error(_e):
-            global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
-            _GA4_PERMISSION_ERROR = True
-            _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
-            return pd.DataFrame()
-        raise
+    resp = _run_ga4_report(req)
+    if resp is None:
+        global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
+        _GA4_PERMISSION_ERROR = True
+        _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
+        return pd.DataFrame()
     rows = []
     for row in resp.rows:
         rows.append({
@@ -1591,23 +1645,18 @@ def get_ga4_monthly_yoy():
     return pd.DataFrame(rows)
 
 def get_ga4_monthly_yoy_organic():
-    creds  = get_credentials()
-    client = BetaAnalyticsDataClient(credentials=creds)
     req = RunReportRequest(
         property=f"properties/{PROPERTY_ID}",
         date_ranges=[DateRange(start_date="2022-01-01", end_date="today")],
         dimensions=[Dimension(name="year"), Dimension(name="month"), Dimension(name="sessionDefaultChannelGroup")],
         metrics=[Metric(name="sessions")]
     )
-    try:
-        resp = client.run_report(req)
-    except Exception as _e:
-        if _check_permission_error(_e):
-            global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
-            _GA4_PERMISSION_ERROR = True
-            _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
-            return pd.DataFrame()
-        raise
+    resp = _run_ga4_report(req)
+    if resp is None:
+        global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
+        _GA4_PERMISSION_ERROR = True
+        _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
+        return pd.DataFrame()
     rows = []
     for row in resp.rows:
         if row.dimension_values[2].value == "Organic Search":
@@ -1619,8 +1668,6 @@ def get_ga4_monthly_yoy_organic():
     return pd.DataFrame(rows)
 
 def get_ga4_segmentation_monthly():
-    creds    = get_credentials()
-    client   = BetaAnalyticsDataClient(credentials=creds)
     seg_end   = date.today() - timedelta(days=1)
     seg_start = seg_end.replace(day=1) - timedelta(days=365 * 2)
     req = RunReportRequest(
@@ -1629,15 +1676,12 @@ def get_ga4_segmentation_monthly():
         dimensions=[Dimension(name="year"), Dimension(name="month"), Dimension(name="sessionDefaultChannelGroup")],
         metrics=[Metric(name="sessions")]
     )
-    try:
-        resp = client.run_report(req)
-    except Exception as _e:
-        if _check_permission_error(_e):
-            global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
-            _GA4_PERMISSION_ERROR = True
-            _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
-            return pd.DataFrame()
-        raise
+    resp = _run_ga4_report(req)
+    if resp is None:
+        global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
+        _GA4_PERMISSION_ERROR = True
+        _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
+        return pd.DataFrame()
     rows = []
     for row in resp.rows:
         channel = row.dimension_values[2].value
@@ -1658,8 +1702,6 @@ def get_ga4_segmentation_monthly():
     return df.sort_values("sort_key")
 
 def get_ga4_monthly_engagement(start, end):
-    creds  = get_credentials()
-    client = BetaAnalyticsDataClient(credentials=creds)
     req = RunReportRequest(
         property=f"properties/{PROPERTY_ID}",
         date_ranges=[DateRange(start_date=str(start), end_date=str(end))],
@@ -1672,15 +1714,12 @@ def get_ga4_monthly_engagement(start, end):
             )
         ),
     )
-    try:
-        resp = client.run_report(req)
-    except Exception as _e:
-        if _check_permission_error(_e):
-            global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
-            _GA4_PERMISSION_ERROR = True
-            _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
-            return pd.DataFrame()
-        raise
+    resp = _run_ga4_report(req)
+    if resp is None:
+        global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
+        _GA4_PERMISSION_ERROR = True
+        _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
+        return pd.DataFrame()
     rows = []
     for row in resp.rows:
         rows.append({
@@ -1693,23 +1732,18 @@ def get_ga4_monthly_engagement(start, end):
     return df
 
 def get_ga4_device(start, end):
-    creds  = get_credentials()
-    client = BetaAnalyticsDataClient(credentials=creds)
     req = RunReportRequest(
         property=f"properties/{PROPERTY_ID}",
         date_ranges=[DateRange(start_date=str(start), end_date=str(end))],
         dimensions=[Dimension(name="deviceCategory")],
         metrics=[Metric(name="sessions"), Metric(name="engagementRate"), Metric(name="averageSessionDuration")]
     )
-    try:
-        resp = client.run_report(req)
-    except Exception as _e:
-        if _check_permission_error(_e):
-            global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
-            _GA4_PERMISSION_ERROR = True
-            _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
-            return pd.DataFrame()
-        raise
+    resp = _run_ga4_report(req)
+    if resp is None:
+        global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
+        _GA4_PERMISSION_ERROR = True
+        _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
+        return pd.DataFrame()
     rows = []
     for row in resp.rows:
         rows.append({
@@ -1721,8 +1755,6 @@ def get_ga4_device(start, end):
     return pd.DataFrame(rows).sort_values("Sessions", ascending=False)
 
 def get_ga4_top_cities():
-    creds  = get_credentials()
-    client = BetaAnalyticsDataClient(credentials=creds)
     start  = date.today() - timedelta(days=180)
     req = RunReportRequest(
         property=f"properties/{PROPERTY_ID}",
@@ -1738,15 +1770,12 @@ def get_ga4_top_cities():
         limit=12,
         order_bys=[{"metric": {"metric_name": "sessions"}, "desc": True}]
     )
-    try:
-        resp = client.run_report(req)
-    except Exception as _e:
-        if _check_permission_error(_e):
-            global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
-            _GA4_PERMISSION_ERROR = True
-            _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
-            return pd.DataFrame()
-        raise
+    resp = _run_ga4_report(req)
+    if resp is None:
+        global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
+        _GA4_PERMISSION_ERROR = True
+        _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
+        return pd.DataFrame()
     rows = []
     for row in resp.rows:
         city = row.dimension_values[0].value
@@ -1755,8 +1784,6 @@ def get_ga4_top_cities():
     return pd.DataFrame(rows).head(10)
 
 def get_ga4_top_countries():
-    creds  = get_credentials()
-    client = BetaAnalyticsDataClient(credentials=creds)
     start  = date.today() - timedelta(days=180)
     req = RunReportRequest(
         property=f"properties/{PROPERTY_ID}",
@@ -1787,8 +1814,6 @@ def get_ga4_top_countries():
     return pd.DataFrame(rows).head(10)
 
 def get_gsc_data(start, end):
-    creds   = get_credentials()
-    service = build("searchconsole", "v1", credentials=creds)
     body = {
         "startDate":  str(start),
         "endDate":    str(end),
@@ -1796,12 +1821,9 @@ def get_gsc_data(start, end):
         "rowLimit":   25,
         "orderBy":    [{"fieldName": "clicks", "sortOrder": "DESCENDING"}]
     }
-    try:
-        resp = service.searchanalytics().query(siteUrl=SITE_URL, body=body).execute()
-    except Exception as _e:
-        if _check_permission_error(_e):
-            return pd.DataFrame()
-        raise
+    resp = _run_gsc_query(SITE_URL, body)
+    if resp is None:
+        return pd.DataFrame()
     rows = []
     for row in resp.get("rows", []):
         rows.append({
@@ -2767,7 +2789,7 @@ if _GA4_PERMISSION_ERROR:
         f"⚠️ The service account does not have access to this property (GA4 ID: {_GA4_PERMISSION_MSG}). "
         f"Charts will be empty. To fix: log into Google Analytics with the account that owns this property, "
         f"go to Admin → Account Access Management, and add "
-        f"simplotel-dashboard@cs-analytics-link.iam.gserviceaccount.com as Viewer.",
+        f"simplotel-dashboard@cs-analytics-link.iam.gserviceaccount.com or simplotel-dashboard-2@cs-analytics-link.iam.gserviceaccount.com as Viewer.",
         icon="🔒"
     )
 st.caption(
