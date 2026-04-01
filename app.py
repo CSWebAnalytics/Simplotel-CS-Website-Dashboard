@@ -1799,15 +1799,12 @@ def get_ga4_top_countries():
         limit=10,
         order_bys=[{"metric": {"metric_name": "sessions"}, "desc": True}]
     )
-    try:
-        resp = client.run_report(req)
-    except Exception as _e:
-        if _check_permission_error(_e):
-            global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
-            _GA4_PERMISSION_ERROR = True
-            _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
-            return pd.DataFrame()
-        raise
+    resp = _run_ga4_report(req)
+    if resp is None:
+        global _GA4_PERMISSION_ERROR, _GA4_PERMISSION_MSG
+        _GA4_PERMISSION_ERROR = True
+        _GA4_PERMISSION_MSG   = str(PROPERTY_ID)
+        return pd.DataFrame()
     rows = []
     for row in resp.rows:
         rows.append({"Country": row.dimension_values[0].value, "Sessions": int(row.metric_values[0].value)})
