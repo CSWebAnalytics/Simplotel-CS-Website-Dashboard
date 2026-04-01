@@ -20,6 +20,143 @@ from googleapiclient.discovery import build
 
 st.set_page_config(page_title="Customer Success Website Analytics Dashboard", layout="wide")
 
+# ── GLOBAL BUTTON STYLES ──────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* ── Base button reset & shared styles ── */
+.stButton > button {
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    font-size: 13.5px !important;
+    letter-spacing: 0.2px !important;
+    transition: all 0.18s ease !important;
+    cursor: pointer !important;
+    outline: none !important;
+    border: 1.5px solid transparent !important;
+}
+
+/* ── Standard (secondary) buttons ── */
+.stButton > button:not([kind="primary"]) {
+    background: #FFFFFF !important;
+    color: #1F4E79 !important;
+    border: 1.5px solid #B8CCE0 !important;
+    box-shadow: 0 1px 3px rgba(31,78,121,0.10),
+                0 1px 2px rgba(31,78,121,0.06) !important;
+}
+.stButton > button:not([kind="primary"]):hover {
+    background: #EEF4FB !important;
+    border-color: #4C8BF5 !important;
+    box-shadow: 0 0 0 3px rgba(76,139,245,0.18),
+                0 2px 6px rgba(31,78,121,0.14) !important;
+    color: #1F4E79 !important;
+}
+.stButton > button:not([kind="primary"]):active {
+    background: #D6E8F7 !important;
+    box-shadow: 0 0 0 3px rgba(76,139,245,0.25) !important;
+    transform: translateY(1px) !important;
+}
+.stButton > button:not([kind="primary"]):focus {
+    border-color: #4C8BF5 !important;
+    box-shadow: 0 0 0 3px rgba(76,139,245,0.22) !important;
+}
+
+/* ── Primary buttons (Load / Refresh, Apply) ── */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #1A73E8 0%, #1558B8 100%) !important;
+    color: #FFFFFF !important;
+    border: 1.5px solid #1558B8 !important;
+    box-shadow: 0 2px 6px rgba(26,115,232,0.35),
+                0 1px 2px rgba(26,115,232,0.20) !important;
+}
+.stButton > button[kind="primary"]:hover {
+    background: linear-gradient(135deg, #1E7FFF 0%, #1A63D4 100%) !important;
+    box-shadow: 0 0 0 3px rgba(26,115,232,0.22),
+                0 4px 12px rgba(26,115,232,0.40) !important;
+    transform: translateY(-1px) !important;
+}
+.stButton > button[kind="primary"]:active {
+    background: linear-gradient(135deg, #1558B8 0%, #1044A0 100%) !important;
+    box-shadow: 0 0 0 3px rgba(26,115,232,0.28) !important;
+    transform: translateY(1px) !important;
+}
+.stButton > button[kind="primary"]:focus {
+    box-shadow: 0 0 0 3px rgba(26,115,232,0.30),
+                0 2px 6px rgba(26,115,232,0.35) !important;
+}
+
+/* ── Sidebar-specific: calendar nav ◀ ▶ ── */
+[data-testid="stSidebar"] .stButton > button:not([kind="primary"]) {
+    background: #F5F8FF !important;
+    border: 1.5px solid #C8D9EE !important;
+    color: #1F4E79 !important;
+    box-shadow: 0 1px 2px rgba(31,78,121,0.08) !important;
+    border-radius: 6px !important;
+}
+[data-testid="stSidebar"] .stButton > button:not([kind="primary"]):hover {
+    background: #E3EEFA !important;
+    border-color: #4C8BF5 !important;
+    box-shadow: 0 0 0 3px rgba(76,139,245,0.15),
+                0 2px 5px rgba(31,78,121,0.12) !important;
+}
+
+/* ── Dropdown trigger button — date picker ── */
+[data-testid="stSidebar"] .stButton > button:first-of-type {
+    text-align: left !important;
+    background: #FFFFFF !important;
+    border: 1.5px solid #B8CCE0 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 1px 4px rgba(31,78,121,0.10) !important;
+    color: #1F4E79 !important;
+    font-weight: 500 !important;
+}
+[data-testid="stSidebar"] .stButton > button:first-of-type:hover {
+    border-color: #4C8BF5 !important;
+    box-shadow: 0 0 0 3px rgba(76,139,245,0.15),
+                0 2px 6px rgba(31,78,121,0.12) !important;
+}
+
+/* ── Download buttons ── */
+.stDownloadButton > button {
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    background: #FFFFFF !important;
+    color: #0F6E56 !important;
+    border: 1.5px solid #9FE1CB !important;
+    box-shadow: 0 1px 3px rgba(15,110,86,0.10),
+                0 1px 2px rgba(15,110,86,0.06) !important;
+    transition: all 0.18s ease !important;
+}
+.stDownloadButton > button:hover {
+    background: #E1F5EE !important;
+    border-color: #1D9E75 !important;
+    box-shadow: 0 0 0 3px rgba(29,158,117,0.18),
+                0 2px 6px rgba(15,110,86,0.14) !important;
+    transform: translateY(-1px) !important;
+}
+.stDownloadButton > button:active {
+    transform: translateY(1px) !important;
+    box-shadow: 0 0 0 3px rgba(29,158,117,0.25) !important;
+}
+
+/* ── Toggle ── */
+.stToggle label {
+    font-weight: 500 !important;
+    font-size: 13.5px !important;
+}
+
+/* ── Expander ── */
+.streamlit-expanderHeader {
+    border-radius: 8px !important;
+    border: 1.5px solid #D0E4F4 !important;
+    box-shadow: 0 1px 3px rgba(31,78,121,0.07) !important;
+    font-weight: 600 !important;
+    color: #1F4E79 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ── PROPERTY REGISTRY ────────────────────────────────────────────────────────
 # Name, GA4 ID, domain — GSC URL is auto-matched from your verified sites list
 PORTFOLIO = [
@@ -69,11 +206,14 @@ def get_credentials():
     ]
 
     # ── Streamlit Cloud: load from secrets ───────────────────────────────────
-    if hasattr(st, "secrets") and "service_account_json" in st.secrets:
-        sa_info = json.loads(st.secrets["service_account_json"])
-        return service_account.Credentials.from_service_account_info(
-            sa_info, scopes=sa_scopes
-        )
+    try:
+        if hasattr(st, "secrets") and "service_account_json" in st.secrets:
+            sa_info = json.loads(st.secrets["service_account_json"])
+            return service_account.Credentials.from_service_account_info(
+                sa_info, scopes=sa_scopes
+            )
+    except Exception:
+        pass  # No secrets.toml locally — fall through to file-based auth
 
     # ── Local: load from service account JSON file ───────────────────────────
     sa_file = "cs-analytics-link-b5e07310a9fe.json"
@@ -571,35 +711,211 @@ else:
 
 st.sidebar.markdown("---")
 
-preset = st.sidebar.selectbox("Date range", [
-    "Last 30 days","Last 7 days","Last 28 days","Last 90 days",
-    "This month","Last month","This year","Yesterday","Today","Custom"
-])
-today = date.today()
-if   preset == "Last 7 days":   start_date, end_date = today-timedelta(days=7),  today-timedelta(days=1)
-elif preset == "Last 28 days":  start_date, end_date = today-timedelta(days=28), today-timedelta(days=1)
-elif preset == "Last 30 days":  start_date, end_date = today-timedelta(days=30), today-timedelta(days=1)
-elif preset == "Last 90 days":  start_date, end_date = today-timedelta(days=90), today-timedelta(days=1)
-elif preset == "This month":    start_date, end_date = today.replace(day=1),     today-timedelta(days=1)
-elif preset == "Last month":
-    first_this = today.replace(day=1)
-    end_date   = first_this - timedelta(days=1)
-    start_date = end_date.replace(day=1)
-elif preset == "This year":     start_date, end_date = today.replace(month=1, day=1), today-timedelta(days=1)
-elif preset == "Yesterday":     start_date, end_date = today-timedelta(days=1), today-timedelta(days=1)
-elif preset == "Today":         start_date, end_date = today, today
-else:
-    start_date = st.sidebar.date_input("Start date", today-timedelta(days=30))
-    end_date   = st.sidebar.date_input("End date",   today-timedelta(days=1))
+# ── DATE PICKER — DROPDOWN STYLE ──────────────────────────────────────────────
+import calendar as _cal
 
-st.sidebar.caption(f"{start_date.strftime('%d %b %Y')} – {end_date.strftime('%d %b %Y')}")
+_cal_today = date.today()
+today      = _cal_today
+
+# Session state init
+for _k, _v in [
+    ("dp_open",       False),
+    ("dp_year",       _cal_today.year),
+    ("dp_month",      _cal_today.month),
+    ("dp_start",      _cal_today - timedelta(days=29)),
+    ("dp_end",        _cal_today - timedelta(days=1)),
+    ("dp_tmp_start",  None),
+    ("dp_tmp_end",    None),
+    ("dp_step",       "start"),
+    ("dp_preset",     "Last 30 days"),
+]:
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+# ── Dropdown trigger button ────────────────────────────────────────────────────
+_s  = st.session_state["dp_start"]
+_e  = st.session_state["dp_end"]
+_trigger_label = (
+    f"{st.session_state['dp_preset']}  "
+    f"{_s.strftime('%b %d')} – {_e.strftime('%b %d, %Y')} ▾"
+)
+if st.sidebar.button(_trigger_label, key="dp_trigger", use_container_width=True):
+    st.session_state["dp_open"]      = not st.session_state["dp_open"]
+    st.session_state["dp_tmp_start"] = st.session_state["dp_start"]
+    st.session_state["dp_tmp_end"]   = st.session_state["dp_end"]
+    st.session_state["dp_step"]      = "start"
+    st.rerun()
+
+# ── Dropdown panel (shown when open) ──────────────────────────────────────────
+if st.session_state["dp_open"]:
+
+    _cy  = st.session_state["dp_year"]
+    _cm  = st.session_state["dp_month"]
+    _ts  = st.session_state["dp_tmp_start"]
+    _te  = st.session_state["dp_tmp_end"]
+
+    # Start / End date text inputs at top
+    _di1, _di2 = st.sidebar.columns(2)
+    with _di1:
+        _new_start = st.date_input(
+            "Start date",
+            value=_ts if _ts else _cal_today - timedelta(days=29),
+            key="dp_inp_start"
+        )
+        if _new_start != _ts:
+            st.session_state["dp_tmp_start"] = _new_start
+            if _new_start > (_te or _new_start):
+                st.session_state["dp_tmp_end"] = _new_start
+            st.rerun()
+    with _di2:
+        _new_end = st.date_input(
+            "End date",
+            value=_te if _te else _cal_today - timedelta(days=1),
+            key="dp_inp_end"
+        )
+        if _new_end != _te:
+            st.session_state["dp_tmp_end"] = _new_end
+            st.rerun()
+
+    # Month navigation
+    _mn1, _mn2, _mn3 = st.sidebar.columns([1, 3, 1])
+    with _mn1:
+        if st.button("◀", key="dp_prev", use_container_width=True):
+            if _cm == 1:
+                st.session_state["dp_month"] = 12
+                st.session_state["dp_year"]  = _cy - 1
+            else:
+                st.session_state["dp_month"] = _cm - 1
+            st.rerun()
+    with _mn2:
+        st.markdown(
+            f"<div style='text-align:center;font-weight:600;font-size:13px;"
+            f"padding:6px 0;letter-spacing:0.5px'>"
+            f"{_cal.month_abbr[_cm].upper()} {_cy}</div>",
+            unsafe_allow_html=True
+        )
+    with _mn3:
+        if st.button("▶", key="dp_next", use_container_width=True):
+            if _cm == 12:
+                st.session_state["dp_month"] = 1
+                st.session_state["dp_year"]  = _cy + 1
+            else:
+                st.session_state["dp_month"] = _cm + 1
+            st.rerun()
+
+    # Day of week header
+    _hcols = st.sidebar.columns(7)
+    for _i, _lbl in enumerate(["S","M","T","W","T","F","S"]):
+        _hcols[_i].markdown(
+            f"<div style='text-align:center;font-size:11px;color:#888;"
+            f"font-weight:600;padding:2px 0'>{_lbl}</div>",
+            unsafe_allow_html=True
+        )
+
+    # Calendar grid — sunday-first to match screenshot
+    _weeks = _cal.monthcalendar(_cy, _cm)
+    # Reorder: monthcalendar returns Mon-first; shift to Sun-first
+    _sun_first = []
+    for _wk in _weeks:
+        _sun_first.append([_wk[6]] + _wk[:6])
+
+    for _wk in _sun_first:
+        _gc = st.sidebar.columns(7)
+        for _gi, _d in enumerate(_wk):
+            if _d == 0:
+                _gc[_gi].markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
+                continue
+            _td   = date(_cy, _cm, _d)
+            _i_s  = (_ts == _td)
+            _i_e  = (_te == _td)
+            _i_r  = (_ts and _te and _ts < _td < _te)
+            _i_t  = (_td == _cal_today)
+            if _i_s or _i_e:
+                _sty = "background:#1A73E8;color:#fff;border-radius:50%;font-weight:700"
+            elif _i_r:
+                _sty = "background:#E8F0FE;color:#1A73E8"
+            elif _i_t:
+                _sty = "color:#1A73E8;font-weight:700;border:1.5px solid #1A73E8;border-radius:50%"
+            else:
+                _sty = "color:inherit"
+            _gc[_gi].markdown(
+                f"<div style='text-align:center;font-size:12px;{_sty};"
+                f"padding:3px 0;line-height:1.6'>{_d}</div>",
+                unsafe_allow_html=True
+            )
+            if _gc[_gi].button("​", key=f"dp_{_cy}_{_cm}_{_d}", use_container_width=True):
+                if st.session_state["dp_step"] == "start" or st.session_state["dp_tmp_end"] is not None:
+                    st.session_state["dp_tmp_start"] = _td
+                    st.session_state["dp_tmp_end"]   = None
+                    st.session_state["dp_step"]      = "end"
+                else:
+                    _prev_start = st.session_state["dp_tmp_start"]
+                    if _td < _prev_start:
+                        st.session_state["dp_tmp_end"]   = _prev_start
+                        st.session_state["dp_tmp_start"] = _td
+                    else:
+                        st.session_state["dp_tmp_end"] = _td
+                    st.session_state["dp_step"] = "start"
+                st.rerun()
+
+    # Apply / Cancel
+    _ac1, _ac2 = st.sidebar.columns(2)
+    with _ac1:
+        if st.button("Cancel", key="dp_cancel", use_container_width=True):
+            st.session_state["dp_open"] = False
+            st.rerun()
+    with _ac2:
+        if st.button("Apply", key="dp_apply", use_container_width=True, type="primary"):
+            if st.session_state["dp_tmp_start"] and st.session_state["dp_tmp_end"]:
+                st.session_state["dp_start"]  = st.session_state["dp_tmp_start"]
+                st.session_state["dp_end"]    = st.session_state["dp_tmp_end"]
+                st.session_state["dp_preset"] = "Custom"
+            st.session_state["dp_open"] = False
+            st.rerun()
+
 st.sidebar.markdown("---")
+
+# ── PRESET SHORTCUTS ──────────────────────────────────────────────────────────
+_preset_opts = [
+    "Last 30 days","Last 7 days","Last 28 days","Last 90 days",
+    "This month","Last month","This year","Yesterday","Today"
+]
+_preset_idx = _preset_opts.index(st.session_state["dp_preset"])     if st.session_state["dp_preset"] in _preset_opts else 0
+_chosen = st.sidebar.selectbox("Quick select", _preset_opts, index=_preset_idx, key="dp_quick")
+if _chosen != st.session_state["dp_preset"]:
+    st.session_state["dp_preset"] = _chosen
+    if   _chosen == "Last 7 days":   _ps, _pe = today-timedelta(days=7),  today-timedelta(days=1)
+    elif _chosen == "Last 28 days":  _ps, _pe = today-timedelta(days=28), today-timedelta(days=1)
+    elif _chosen == "Last 30 days":  _ps, _pe = today-timedelta(days=29), today-timedelta(days=1)
+    elif _chosen == "Last 90 days":  _ps, _pe = today-timedelta(days=90), today-timedelta(days=1)
+    elif _chosen == "This month":    _ps, _pe = today.replace(day=1),     today-timedelta(days=1)
+    elif _chosen == "Last month":
+        _ft = today.replace(day=1)
+        _pe = _ft - timedelta(days=1)
+        _ps = _pe.replace(day=1)
+    elif _chosen == "This year":     _ps, _pe = today.replace(month=1, day=1), today-timedelta(days=1)
+    elif _chosen == "Yesterday":     _ps, _pe = today-timedelta(days=1), today-timedelta(days=1)
+    else:                            _ps, _pe = today, today
+    st.session_state["dp_start"] = _ps
+    st.session_state["dp_end"]   = _pe
+    st.rerun()
+
+# ── Resolve start_date / end_date for the rest of the app ─────────────────────
+start_date = st.session_state["dp_start"]
+end_date   = st.session_state["dp_end"]
+
+st.sidebar.markdown("---")
+
+# ── COMPARE ───────────────────────────────────────────────────────────────────
 compare = st.sidebar.toggle("Compare to previous period", value=False)
 if compare:
     period_days = (end_date - start_date).days + 1
     prev_end    = start_date - timedelta(days=1)
     prev_start  = prev_end - timedelta(days=period_days - 1)
     st.sidebar.caption(f"vs {prev_start.strftime('%d %b')} – {prev_end.strftime('%d %b %Y')}")
+    with st.sidebar.expander("Custom comparison range"):
+        prev_start = st.date_input("Compare from", prev_start, key="cmp_start")
+        prev_end   = st.date_input("Compare to",   prev_end,   key="cmp_end")
 
 st.sidebar.markdown("---")
 load = st.sidebar.button("Load / Refresh Data", type="primary", use_container_width=True)
@@ -703,6 +1019,36 @@ User request: {user_query}"""
     raw = response.choices[0].message.content.strip()
     raw = raw.replace("```json", "").replace("```", "").strip()
     return json.loads(raw)
+
+def generate_text_insight(user_query, df, api_key, property_name):
+    """
+    Given the query and the resulting dataframe, ask Groq to write
+    a plain-English analytical response with key insights and observations.
+    """
+    client = Groq(api_key=api_key)
+    # Convert df to a compact string for the prompt
+    data_str = df.to_string(index=False, max_rows=50)
+    prompt = f"""You are a hotel website analytics expert working for a Customer Success team at Simplotel.
+The property is: {property_name}
+The team asked: "{user_query}"
+Here is the data that was retrieved:
+
+{data_str}
+
+Write a clear, concise analytical response in plain English. Structure it as:
+1. A 1-2 sentence direct answer to the question.
+2. 3-5 bullet points with the most important observations from the data.
+3. 1-2 sentences on what this means for the hotel and any recommended action.
+
+Keep it professional but conversational. Do not use technical jargon. Focus on what matters to a hotel marketer."""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        max_tokens=600,
+    )
+    return response.choices[0].message.content.strip()
 
 # ── Execute GA4 query from instruction ────────────────────────────────────
 def execute_ga4_query(instruction, start_str, end_str):
@@ -895,11 +1241,21 @@ if run_query:
                     st.warning("No data returned for this query and date range.")
                 else:
                     title = instruction.get("title", user_query[:60])
+                    # Generate text insight
+                    with st.spinner("Generating insight..."):
+                        try:
+                            text_insight = generate_text_insight(
+                                user_query, df_result, claude_key,
+                                PROPERTIES[selected_label]["name"]
+                            )
+                        except Exception:
+                            text_insight = ""
                     st.session_state["query_results"].append({
                         "title":       title,
                         "query":       user_query,
                         "df":          df_result,
                         "instruction": instruction,
+                        "insight":     text_insight,
                     })
             except json.JSONDecodeError:
                 st.error("The AI returned an unexpected response. Try rephrasing your query.")
@@ -923,21 +1279,46 @@ if st.session_state["query_results"]:
             st.session_state["query_results"] = []
             st.rerun()
 
+    # Display in reverse order (newest first)
+    results_to_delete = []
     for i, result in enumerate(reversed(st.session_state["query_results"])):
+        real_idx = len(st.session_state["query_results"]) - 1 - i
         with st.expander(f"**{result['title']}**  ·  {result['query']}", expanded=(i == 0)):
+
+            # ── AI Text Insight ───────────────────────────────────────────
+            if result.get("insight"):
+                st.markdown("#### 💡 AI Insight")
+                st.info(result["insight"])
+
+            # ── Chart ─────────────────────────────────────────────────────
             fig = render_query_chart(result["df"], result["instruction"])
             if fig:
                 st.plotly_chart(fig, use_container_width=True, key=f"qchart_{i}")
+
+            # ── Data Table ────────────────────────────────────────────────
             st.dataframe(result["df"], use_container_width=True, hide_index=True)
-            # Individual download
-            single_excel = build_excel([result])
-            st.download_button(
-                label="📥 Download this result as Excel",
-                data=single_excel,
-                file_name=f"{result['title'][:40]}_{date.today()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"dl_{i}",
-            )
+
+            # ── Action Row: Download + Delete ─────────────────────────────
+            col_exc, col_del = st.columns([3, 1])
+            with col_exc:
+                single_excel = build_excel([result])
+                st.download_button(
+                    label="📥 Download as Excel",
+                    data=single_excel,
+                    file_name=f"{result['title'][:40]}_{date.today()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_{i}",
+                    use_container_width=True,
+                )
+            with col_del:
+                if st.button("🗑 Delete", key=f"del_{i}", use_container_width=True):
+                    results_to_delete.append(real_idx)
+
+    # Process deletions after the loop
+    if results_to_delete:
+        for idx in sorted(results_to_delete, reverse=True):
+            del st.session_state["query_results"][idx]
+        st.rerun()
 
 st.markdown("---")
 
@@ -954,48 +1335,138 @@ st.caption(
 )
 
 # ── YOY ALL CHANNELS ──────────────────────────────────────────────────────
-st.markdown("### Year-on-Year Traffic — Monthly Sessions (All Channels)")
-with st.spinner("Loading overall year-on-year data..."):
-    df_yoy = get_ga4_monthly_yoy()
+st.markdown("### Year-on-Year Traffic — All Channels")
+_xg_all = st.selectbox("X-axis grouping", ["Month","Week","Day"], key="xg_all")
+with st.spinner("Loading year-on-year data..."):
+    if _xg_all == "Month":
+        df_yoy = get_ga4_monthly_yoy()
+    else:
+        _ga4c = BetaAnalyticsDataClient(credentials=get_credentials())
+        if _xg_all == "Week":
+            _rq = RunReportRequest(
+                property=f"properties/{PROPERTY_ID}",
+                date_ranges=[DateRange(start_date="2022-01-01", end_date="today")],
+                dimensions=[Dimension(name="year"), Dimension(name="week")],
+                metrics=[Metric(name="sessions")]
+            )
+            _rsp = _ga4c.run_report(_rq)
+            _rows = [{"year": int(r.dimension_values[0].value),
+                      "label": f"Wk {int(r.dimension_values[1].value):02d} · {r.dimension_values[0].value}",
+                      "sort": int(r.dimension_values[0].value)*100 + int(r.dimension_values[1].value),
+                      "sessions": int(r.metric_values[0].value)} for r in _rsp.rows]
+        else:
+            import datetime as _dtt
+            _rq = RunReportRequest(
+                property=f"properties/{PROPERTY_ID}",
+                date_ranges=[DateRange(start_date="2024-01-01", end_date="today")],
+                dimensions=[Dimension(name="date")],
+                metrics=[Metric(name="sessions")]
+            )
+            _rsp = _ga4c.run_report(_rq)
+            _rows = [{"year": int(r.dimension_values[0].value[:4]),
+                      "label": _dtt.datetime.strptime(r.dimension_values[0].value, "%Y%m%d").strftime("%d %b %Y"),
+                      "sort": int(r.dimension_values[0].value),
+                      "sessions": int(r.metric_values[0].value)} for r in _rsp.rows]
+        df_yoy = pd.DataFrame(_rows).sort_values("sort")
 
 if not df_yoy.empty:
     years   = sorted(df_yoy["year"].unique())
     fig_yoy = go.Figure()
-    for i, year in enumerate(years):
-        df_y   = df_yoy[df_yoy["year"] == year].set_index("month")
-        y_vals = [int(df_y.loc[m, "sessions"]) if m in df_y.index else None for m in range(1, 13)]
-        t_vals = [f"{v:,}" if v else "" for v in y_vals]
-        fig_yoy.add_trace(go.Bar(
-            name=str(year), x=MONTH_LABELS, y=y_vals,
-            text=t_vals, textposition="outside", textfont=dict(size=10),
-            marker_color=YEAR_COLORS[i % len(YEAR_COLORS)], cliponaxis=False,
-        ))
+    if _xg_all == "Month":
+        for i, year in enumerate(years):
+            df_y   = df_yoy[df_yoy["year"] == year].set_index("month")
+            y_vals = [int(df_y.loc[m, "sessions"]) if m in df_y.index else None for m in range(1, 13)]
+            t_vals = [f"{v:,}" if v else "" for v in y_vals]
+            fig_yoy.add_trace(go.Bar(
+                name=str(year), x=MONTH_LABELS, y=y_vals,
+                text=t_vals, textposition="outside", textfont=dict(size=10),
+                marker_color=YEAR_COLORS[i % len(YEAR_COLORS)], cliponaxis=False,
+            ))
+    else:
+        for i, year in enumerate(years):
+            df_y = df_yoy[df_yoy["year"] == year]
+            fig_yoy.add_trace(go.Bar(
+                name=str(year), x=df_y["label"], y=df_y["sessions"],
+                text=df_y["sessions"].apply(lambda v: f"{v:,}"),
+                textposition="outside", textfont=dict(size=9),
+                marker_color=YEAR_COLORS[i % len(YEAR_COLORS)], cliponaxis=False,
+            ))
     max_yoy = df_yoy["sessions"].max()
     layout  = yoy_layout("Overall Sessions")
     layout["yaxis"]["range"] = [0, max_yoy * 1.25]
+    if _xg_all != "Month":
+        layout["xaxis"] = dict(tickfont=dict(size=9), tickangle=-45)
     fig_yoy.update_layout(**layout)
     st.plotly_chart(fig_yoy, use_container_width=True)
 
 # ── YOY ORGANIC ───────────────────────────────────────────────────────────
-st.markdown("### Year-on-Year Traffic — Monthly Sessions (Organic Search Only)")
+st.markdown("### Year-on-Year Traffic — Organic Search Only")
+_xg_org = st.selectbox("X-axis grouping", ["Month","Week","Day"], key="xg_org")
 with st.spinner("Loading organic year-on-year data..."):
-    df_yoy_org = get_ga4_monthly_yoy_organic()
+    if _xg_org == "Month":
+        df_yoy_org = get_ga4_monthly_yoy_organic()
+    else:
+        _ga4o = BetaAnalyticsDataClient(credentials=get_credentials())
+        _flt  = FilterExpression(filter=Filter(
+            field_name="sessionDefaultChannelGroup",
+            string_filter=Filter.StringFilter(value="Organic Search")
+        ))
+        if _xg_org == "Week":
+            _rqo = RunReportRequest(
+                property=f"properties/{PROPERTY_ID}",
+                date_ranges=[DateRange(start_date="2022-01-01", end_date="today")],
+                dimensions=[Dimension(name="year"), Dimension(name="week")],
+                metrics=[Metric(name="sessions")],
+                dimension_filter=_flt
+            )
+            _rspo = _ga4o.run_report(_rqo)
+            _rowso = [{"year": int(r.dimension_values[0].value),
+                       "label": f"Wk {int(r.dimension_values[1].value):02d} · {r.dimension_values[0].value}",
+                       "sort": int(r.dimension_values[0].value)*100 + int(r.dimension_values[1].value),
+                       "sessions": int(r.metric_values[0].value)} for r in _rspo.rows]
+        else:
+            import datetime as _dtt2
+            _rqo = RunReportRequest(
+                property=f"properties/{PROPERTY_ID}",
+                date_ranges=[DateRange(start_date="2024-01-01", end_date="today")],
+                dimensions=[Dimension(name="date")],
+                metrics=[Metric(name="sessions")],
+                dimension_filter=_flt
+            )
+            _rspo = _ga4o.run_report(_rqo)
+            _rowso = [{"year": int(r.dimension_values[0].value[:4]),
+                       "label": _dtt2.datetime.strptime(r.dimension_values[0].value, "%Y%m%d").strftime("%d %b %Y"),
+                       "sort": int(r.dimension_values[0].value),
+                       "sessions": int(r.metric_values[0].value)} for r in _rspo.rows]
+        df_yoy_org = pd.DataFrame(_rowso).sort_values("sort")
 
 if not df_yoy_org.empty:
     years_org   = sorted(df_yoy_org["year"].unique())
     fig_yoy_org = go.Figure()
-    for i, year in enumerate(years_org):
-        df_y   = df_yoy_org[df_yoy_org["year"] == year].set_index("month")
-        y_vals = [int(df_y.loc[m, "sessions"]) if m in df_y.index else None for m in range(1, 13)]
-        t_vals = [f"{v:,}" if v else "" for v in y_vals]
-        fig_yoy_org.add_trace(go.Bar(
-            name=str(year), x=MONTH_LABELS, y=y_vals,
-            text=t_vals, textposition="outside", textfont=dict(size=10),
-            marker_color=YEAR_COLORS[i % len(YEAR_COLORS)], cliponaxis=False,
-        ))
+    if _xg_org == "Month":
+        for i, year in enumerate(years_org):
+            df_y   = df_yoy_org[df_yoy_org["year"] == year].set_index("month")
+            y_vals = [int(df_y.loc[m, "sessions"]) if m in df_y.index else None for m in range(1, 13)]
+            t_vals = [f"{v:,}" if v else "" for v in y_vals]
+            fig_yoy_org.add_trace(go.Bar(
+                name=str(year), x=MONTH_LABELS, y=y_vals,
+                text=t_vals, textposition="outside", textfont=dict(size=10),
+                marker_color=YEAR_COLORS[i % len(YEAR_COLORS)], cliponaxis=False,
+            ))
+    else:
+        for i, year in enumerate(years_org):
+            df_y = df_yoy_org[df_yoy_org["year"] == year]
+            fig_yoy_org.add_trace(go.Bar(
+                name=str(year), x=df_y["label"], y=df_y["sessions"],
+                text=df_y["sessions"].apply(lambda v: f"{v:,}"),
+                textposition="outside", textfont=dict(size=9),
+                marker_color=YEAR_COLORS[i % len(YEAR_COLORS)], cliponaxis=False,
+            ))
     max_org = df_yoy_org["sessions"].max()
     layout  = yoy_layout("Organic Sessions")
     layout["yaxis"]["range"] = [0, max_org * 1.25]
+    if _xg_org != "Month":
+        layout["xaxis"] = dict(tickfont=dict(size=9), tickangle=-45)
     fig_yoy_org.update_layout(**layout)
     st.plotly_chart(fig_yoy_org, use_container_width=True)
 
@@ -1068,10 +1539,14 @@ if not df_eng.empty:
             title="Engagement Rate (%)", gridcolor="#eeeeee",
             range=[0, 110], title_font=dict(size=13)
         ),
-        xaxis=dict(title="", tickfont=dict(size=12)),
-        margin=dict(t=50, b=70, l=70, r=40),
+        xaxis=dict(
+            title="", tickfont=dict(size=12),
+            range=[-0.5, len(df_eng) - 0.5],
+        ),
+        margin=dict(t=50, b=70, l=70, r=80),
         height=400,
     )
+    fig_eng.update_traces(cliponaxis=False)
     st.plotly_chart(fig_eng, use_container_width=True)
 
 st.markdown("---")
@@ -1205,8 +1680,8 @@ else:
         st.plotly_chart(fig_nb, use_container_width=True)
 
 st.markdown("---")
-# ── GA4 CHANNEL ───────────────────────────────────────────────────────────
-st.markdown("### Google Analytics 4 — Traffic by Channel")
+# ── GA4 CHANNEL (Google Analytics: Custom Chart) ────────────────────────────
+st.markdown("### Google Analytics: Custom Chart")
 with st.spinner("Loading channel data..."):
     df_ga4 = get_ga4_data(start_date, end_date)
 
@@ -1224,14 +1699,16 @@ if compare:
     df_ga4_prev = get_ga4_data(prev_start, prev_end)
     fig_ga4 = go.Figure()
     fig_ga4.add_trace(go.Bar(
-        name="Current Period",  x=df_ga4["channel"], y=df_ga4["sessions"],
+        name=f"Current  ({start_date.strftime('%d %b')} – {end_date.strftime('%d %b %Y')})",
+        x=df_ga4["channel"], y=df_ga4["sessions"],
         marker_color="#4C8BF5",
         text=df_ga4["sessions"].apply(lambda x: f"{x:,}"),
         textposition="outside", textfont=dict(size=11), cliponaxis=False,
     ))
     fig_ga4.add_trace(go.Bar(
-        name="Previous Period", x=df_ga4_prev["channel"], y=df_ga4_prev["sessions"],
-        marker_color="#cccccc",
+        name=f"Previous ({prev_start.strftime('%d %b')} – {prev_end.strftime('%d %b %Y')})",
+        x=df_ga4_prev["channel"], y=df_ga4_prev["sessions"],
+        marker_color="#AACDE8",
         text=df_ga4_prev["sessions"].apply(lambda x: f"{x:,}"),
         textposition="outside", textfont=dict(size=11), cliponaxis=False,
     ))
@@ -1242,7 +1719,7 @@ else:
         textposition="outside", textfont=dict(size=12),
         marker_color="#4C8BF5", cliponaxis=False,
     ))
-max_ga4 = df_ga4["sessions"].max()
+max_ga4 = df_ga4["sessions"].max() if not df_ga4.empty else 1
 fig_ga4.update_layout(
     **BASE,
     barmode="group",
@@ -1251,7 +1728,24 @@ fig_ga4.update_layout(
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5, font=dict(size=12)),
     height=420, margin=dict(t=60, b=60, l=70, r=40)
 )
-st.plotly_chart(fig_ga4, use_container_width=True)
+st.plotly_chart(fig_ga4, use_container_width=True, key="fig_ga4_custom")
+
+# Auto-generate delta metrics when compare is on
+if compare and not df_ga4_prev.empty:
+    st.markdown("**Channel comparison — period over period**")
+    _prev_dict = dict(zip(df_ga4_prev["channel"], df_ga4_prev["sessions"]))
+    _delta_cols = st.columns(min(len(df_ga4), 5))
+    for _ci, (_, _row) in enumerate(df_ga4.iterrows()):
+        if _ci >= 5:
+            break
+        _prev_val = _prev_dict.get(_row["channel"], 0)
+        _delta_n  = _row["sessions"] - _prev_val
+        _pct      = round(_delta_n / _prev_val * 100, 1) if _prev_val > 0 else 0
+        _delta_cols[_ci].metric(
+            label=_row["channel"][:16],
+            value=f"{_row['sessions']:,}",
+            delta=f"{_pct:+.1f}%"
+        )
 
 # ── GSC TOP KEYWORDS ──────────────────────────────────────────────────────
 st.markdown("### Google Search Console — Top Keywords")
