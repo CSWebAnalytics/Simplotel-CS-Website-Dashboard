@@ -938,13 +938,31 @@ st.caption(
     "and return a table, chart, and Excel download."
 )
 
-# ── Claude API key input ──────────────────────────────────────────────────
-claude_key = st.text_input(
-    "Groq API Key",
-    type="password",
-    placeholder="gsk_...",
-    help="Get your free key from console.groq.com → API Keys. It is not stored anywhere.",
-)
+# ── Groq API key — auto-loaded from Streamlit Secrets, fallback to manual ────
+def _get_groq_key():
+    # 1. Streamlit Secrets (cloud deployment — preferred)
+    try:
+        if hasattr(st, "secrets") and "groq_api_key" in st.secrets:
+            return st.secrets["groq_api_key"]
+    except Exception:
+        pass
+    # 2. Environment variable (optional local setup)
+    import os
+    if os.environ.get("GROQ_API_KEY"):
+        return os.environ["GROQ_API_KEY"]
+    # 3. Manual entry fallback (shown only if key not found above)
+    return None
+
+_auto_key = _get_groq_key()
+if _auto_key:
+    claude_key = _auto_key
+else:
+    claude_key = st.text_input(
+        "Groq API Key",
+        type="password",
+        placeholder="gsk_...",
+        help="Key not found in Streamlit Secrets. Enter manually or ask your admin to add groq_api_key to Streamlit Secrets.",
+    )
 
 # ── GA4 dimension/metric schema for Claude ────────────────────────────────
 GA4_SCHEMA = """
