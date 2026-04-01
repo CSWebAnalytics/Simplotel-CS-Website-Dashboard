@@ -3082,67 +3082,70 @@ st.markdown("### Google Analytics: Custom Chart")
 with st.spinner("Loading channel data..."):
     df_ga4 = get_ga4_data(start_date, end_date)
 
-total_sessions = df_ga4["sessions"].sum()
-top_channel    = df_ga4.iloc[0]["channel"] if not df_ga4.empty else "—"
-org_eng        = df_ga4[df_ga4["channel"] == "Organic Search"]["engagement"].values
-org_eng_val    = f"{org_eng[0]}%" if len(org_eng) else "—"
-
-c1, c2, c3 = st.columns(3)
-c1.metric("Total Sessions",          f"{total_sessions:,}")
-c2.metric("Top Channel",              top_channel)
-c3.metric("Organic Engagement Rate",  org_eng_val)
-
-if compare:
-    df_ga4_prev = get_ga4_data(prev_start, prev_end)
-    fig_ga4 = go.Figure()
-    fig_ga4.add_trace(go.Bar(
-        name=f"Current  ({start_date.strftime('%d %b')} – {end_date.strftime('%d %b %Y')})",
-        x=df_ga4["channel"], y=df_ga4["sessions"],
-        marker_color="#4C8BF5",
-        text=df_ga4["sessions"].apply(lambda x: f"{x:,}"),
-        textposition="outside", textfont=dict(size=11), cliponaxis=False,
-    ))
-    fig_ga4.add_trace(go.Bar(
-        name=f"Previous ({prev_start.strftime('%d %b')} – {prev_end.strftime('%d %b %Y')})",
-        x=df_ga4_prev["channel"], y=df_ga4_prev["sessions"],
-        marker_color="#AACDE8",
-        text=df_ga4_prev["sessions"].apply(lambda x: f"{x:,}"),
-        textposition="outside", textfont=dict(size=11), cliponaxis=False,
-    ))
+if df_ga4.empty:
+    st.info("No data available for this property. The service account may not have access to this Google Analytics 4 property yet. Ask your admin to add simplotel-dashboard@cs-analytics-link.iam.gserviceaccount.com as Viewer in Google Analytics.", icon="🔒")
 else:
-    fig_ga4 = go.Figure(go.Bar(
-        x=df_ga4["channel"], y=df_ga4["sessions"],
-        text=df_ga4["sessions"].apply(lambda x: f"{x:,}"),
-        textposition="outside", textfont=dict(size=12),
-        marker_color="#4C8BF5", cliponaxis=False,
-    ))
-max_ga4 = df_ga4["sessions"].max() if not df_ga4.empty else 1
-fig_ga4.update_layout(
-    **BASE,
-    barmode="group",
-    yaxis=dict(gridcolor="#eeeeee", tickformat=",", range=[0, max_ga4 * 1.25]),
-    xaxis=dict(tickfont=dict(size=12)),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5, font=dict(size=12)),
-    height=420, margin=dict(t=60, b=60, l=70, r=40)
-)
-st.plotly_chart(fig_ga4, use_container_width=True, key="fig_ga4_custom")
+    total_sessions = df_ga4["sessions"].sum()
+    top_channel    = df_ga4.iloc[0]["channel"] if not df_ga4.empty else "—"
+    org_eng        = df_ga4[df_ga4["channel"] == "Organic Search"]["engagement"].values
+    org_eng_val    = f"{org_eng[0]}%" if len(org_eng) else "—"
 
-# Auto-generate delta metrics when compare is on
-if compare and not df_ga4_prev.empty:
-    st.markdown("**Channel comparison — period over period**")
-    _prev_dict = dict(zip(df_ga4_prev["channel"], df_ga4_prev["sessions"]))
-    _delta_cols = st.columns(min(len(df_ga4), 5))
-    for _ci, (_, _row) in enumerate(df_ga4.iterrows()):
-        if _ci >= 5:
-            break
-        _prev_val = _prev_dict.get(_row["channel"], 0)
-        _delta_n  = _row["sessions"] - _prev_val
-        _pct      = round(_delta_n / _prev_val * 100, 1) if _prev_val > 0 else 0
-        _delta_cols[_ci].metric(
-            label=_row["channel"][:16],
-            value=f"{_row['sessions']:,}",
-            delta=f"{_pct:+.1f}%"
-        )
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Sessions",          f"{total_sessions:,}")
+    c2.metric("Top Channel",              top_channel)
+    c3.metric("Organic Engagement Rate",  org_eng_val)
+
+    if compare:
+        df_ga4_prev = get_ga4_data(prev_start, prev_end)
+        fig_ga4 = go.Figure()
+        fig_ga4.add_trace(go.Bar(
+            name=f"Current  ({start_date.strftime('%d %b')} – {end_date.strftime('%d %b %Y')})",
+            x=df_ga4["channel"], y=df_ga4["sessions"],
+            marker_color="#4C8BF5",
+            text=df_ga4["sessions"].apply(lambda x: f"{x:,}"),
+            textposition="outside", textfont=dict(size=11), cliponaxis=False,
+        ))
+        fig_ga4.add_trace(go.Bar(
+            name=f"Previous ({prev_start.strftime('%d %b')} – {prev_end.strftime('%d %b %Y')})",
+            x=df_ga4_prev["channel"], y=df_ga4_prev["sessions"],
+            marker_color="#AACDE8",
+            text=df_ga4_prev["sessions"].apply(lambda x: f"{x:,}"),
+            textposition="outside", textfont=dict(size=11), cliponaxis=False,
+        ))
+    else:
+        fig_ga4 = go.Figure(go.Bar(
+            x=df_ga4["channel"], y=df_ga4["sessions"],
+            text=df_ga4["sessions"].apply(lambda x: f"{x:,}"),
+            textposition="outside", textfont=dict(size=12),
+            marker_color="#4C8BF5", cliponaxis=False,
+        ))
+    max_ga4 = df_ga4["sessions"].max() if not df_ga4.empty else 1
+    fig_ga4.update_layout(
+        **BASE,
+        barmode="group",
+        yaxis=dict(gridcolor="#eeeeee", tickformat=",", range=[0, max_ga4 * 1.25]),
+        xaxis=dict(tickfont=dict(size=12)),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5, font=dict(size=12)),
+        height=420, margin=dict(t=60, b=60, l=70, r=40)
+    )
+    st.plotly_chart(fig_ga4, use_container_width=True, key="fig_ga4_custom")
+
+    # Auto-generate delta metrics when compare is on
+    if compare and not df_ga4_prev.empty:
+        st.markdown("**Channel comparison — period over period**")
+        _prev_dict = dict(zip(df_ga4_prev["channel"], df_ga4_prev["sessions"]))
+        _delta_cols = st.columns(min(len(df_ga4), 5))
+        for _ci, (_, _row) in enumerate(df_ga4.iterrows()):
+            if _ci >= 5:
+                break
+            _prev_val = _prev_dict.get(_row["channel"], 0)
+            _delta_n  = _row["sessions"] - _prev_val
+            _pct      = round(_delta_n / _prev_val * 100, 1) if _prev_val > 0 else 0
+            _delta_cols[_ci].metric(
+                label=_row["channel"][:16],
+                value=f"{_row['sessions']:,}",
+                delta=f"{_pct:+.1f}%"
+            )
 
 # ── GSC TOP KEYWORDS ──────────────────────────────────────────────────────
 st.markdown("### Google Search Console — Top Keywords")
