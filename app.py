@@ -1527,71 +1527,81 @@ def get_credentials():
     return creds
 
 
-def get_fallback_credentials_list():
+def _get_all_credentials():
     """
-    Returns a list of SECONDARY and TERTIARY service account credentials.
-    Used when the primary service account hits Google's accounts-per-user limit.
+    Returns a list of ALL available service account credentials.
+    Primary first, then any secondary/tertiary accounts from Streamlit Secrets
+    or local JSON files. Automatically picks up any future service accounts
+    added as service_account_json_4, _5, etc. in Streamlit Secrets.
     """
     sa_scopes = [
         "https://www.googleapis.com/auth/analytics.readonly",
         "https://www.googleapis.com/auth/webmasters.readonly",
     ]
-    fallbacks = []
-    # Secondary service account (simplotel-dashboard-2)
-    try:
-        if hasattr(st, "secrets") and "service_account_json_2" in st.secrets:
-            sa_info = json.loads(st.secrets["service_account_json_2"])
-            fallbacks.append(service_account.Credentials.from_service_account_info(sa_info, scopes=sa_scopes))
-    except Exception:
-        pass
-    if not any("dashboard-2" in str(getattr(c, "service_account_email", "")) for c in fallbacks):
-        sa2 = "cs-analytics-link-18eabe49b35f.json"
-        if os.path.exists(sa2):
-            try: fallbacks.append(service_account.Credentials.from_service_account_file(sa2, scopes=sa_scopes))
-            except Exception: pass
-    # Tertiary service account (simplotel-dashboard-3)
-    try:
-        if hasattr(st, "secrets") and "service_account_json_3" in st.secrets:
-            sa_info = json.loads(st.secrets["service_account_json_3"])
-            fallbacks.append(service_account.Credentials.from_service_account_info(sa_info, scopes=sa_scopes))
-    except Exception:
-        pass
-    if not any("dashboard-3" in str(getattr(c, "service_account_email", "")) for c in fallbacks):
-        sa3 = "cs-analytics-link-dbdb3e9e2df8.json"
-        if os.path.exists(sa3):
-            try: fallbacks.append(service_account.Credentials.from_service_account_file(sa3, scopes=sa_scopes))
-            except Exception: pass
-    return fallbacks
+    all_creds = [get_credentials()]  # Primary always first
+
+    # Auto-discover ALL numbered service accounts from Streamlit Secrets
+    # Checks service_account_json_2, _3, _4, ... up to _20
+    for n in range(2, 21):
+        key = f"service_account_json_{n}"
+        try:
+            if hasattr(st, "secrets") and key in st.secrets:
+                sa_info = json.loads(st.secrets[key])
+                all_creds.append(
+                    service_account.Credentials.from_service_account_info(sa_info, scopes=sa_scopes)
+                )
+        except Exception:
+            pass
+
+    # Also check for local JSON files (for development)
+    import glob
+    for f in sorted(glob.glob("cs-analytics-link-*.json")):
+        try:
+            cred = service_account.Credentials.from_service_account_file(f, scopes=sa_scopes)
+            # Skip if this email is already in the list
+            existing_emails = [getattr(c, "service_account_email", "") for c in all_creds]
+            if getattr(cred, "service_account_email", "") not in existing_emails:
+                all_creds.append(cred)
+        except Exception:
+            pass
+
+    return all_creds
 
 def _run_ga4_report(req):
-    """Run a GA4 report. On PermissionDenied, try each fallback service account."""
-    creds  = get_credentials()
-    client = BetaAnalyticsDataClient(credentials=creds)
-    try:
-        return client.run_report(req)
-    except Exception as e:
-        if _check_permission_error(e):
-            for fb in get_fallback_credentials_list():
-                try: return BetaAnalyticsDataClient(credentials=fb).run_report(req)
-                except Exception: continue
-            return None
-        raise
+    """Run a GA4 report. On PermissionDenied, try each service account."""
+    for cred in _get_all_credentials():
+        try:
+            return BetaAnalyticsDataClient(credentials=cred).run_report(req)
+        except Exception as e:
+            if _check_permission_error(e):
+                continue
+            raise
+    return None
 
 def _run_gsc_query(site_url, body):
-    """Run a GSC query. On PermissionDenied, try each fallback service account."""
-    creds   = get_credentials()
-    service = build("searchconsole", "v1", credentials=creds)
-    try:
-        return service.searchanalytics().query(siteUrl=site_url, body=body).execute()
-    except Exception as e:
-        if _check_permission_error(e):
-            for fb in get_fallback_credentials_list():
-                try:
-                    s2 = build("searchconsole", "v1", credentials=fb)
-                    return s2.searchanalytics().query(siteUrl=site_url, body=body).execute()
-                except Exception: continue
-            return None
-        raise
+    """Run a GSC query. On PermissionDenied, try each service account."""
+    for cred in _get_all_credentials():
+        try:
+            svc = build("searchconsole", "v1", credentials=cred)
+            return svc.searchanalytics().query(siteUrl=site_url, body=body).execute()
+        except Exception as e:
+            if _check_permission_error(e):
+                continue
+            raise
+    return None
+
+def _get_all_gsc_sites():
+    """Fetch verified GSC sites from ALL service accounts and merge them."""
+    all_sites = set()
+    for cred in _get_all_credentials():
+        try:
+            svc = build("searchconsole", "v1", credentials=cred)
+            resp = svc.sites().list().execute()
+            for entry in resp.get("siteEntry", []):
+                all_sites.add(entry["siteUrl"])
+        except Exception:
+            continue
+    return list(all_sites)
 
 # ── DATA FUNCTIONS ────────────────────────────────────────────────────────────
 # Permission error flag — set True when service account lacks access to property
@@ -1840,15 +1850,15 @@ def is_brand(keyword):
     return any(b in kw for b in BRAND_KEYWORDS)
 
 def get_gsc_brand_nonbrand(start, end):
-    creds   = get_credentials()
-    service = build("searchconsole", "v1", credentials=creds)
     body = {
         "startDate":  str(start),
         "endDate":    str(end),
         "dimensions": ["date", "query"],
         "rowLimit":   25000,
     }
-    resp = service.searchanalytics().query(siteUrl=SITE_URL, body=body).execute()
+    resp = _run_gsc_query(SITE_URL, body)
+    if resp is None:
+        return pd.DataFrame(), pd.DataFrame()
     rows = []
     for row in resp.get("rows", []):
         rows.append({
@@ -1996,14 +2006,8 @@ def discover_properties():
     """
     creds = get_credentials()
 
-    # ── GSC: fetch all verified sites ────────────────────────────────────────
-    gsc_sites = []
-    try:
-        gsc_service = build("searchconsole", "v1", credentials=creds)
-        resp = gsc_service.sites().list().execute()
-        gsc_sites = [s["siteUrl"] for s in resp.get("siteEntry", [])]
-    except Exception:
-        gsc_sites = []
+    # ── GSC: fetch verified sites from ALL service accounts ─────────────────
+    gsc_sites = _get_all_gsc_sites()
 
     def clean_domain(url):
         return (url.replace("sc-domain:", "")
@@ -2470,8 +2474,6 @@ def execute_ga4_query(instruction, start_str, end_str):
 def execute_gsc_query(instruction, start_str, end_str):
     if not gsc_available:
         return pd.DataFrame()
-    creds   = get_credentials()
-    service = build("searchconsole", "v1", credentials=creds)
     g       = instruction.get("gsc", {})
     body = {
         "startDate":  start_str,
@@ -2480,7 +2482,9 @@ def execute_gsc_query(instruction, start_str, end_str):
         "rowLimit":   g.get("row_limit", 25),
         "orderBy":    [{"fieldName": g.get("order_by", "clicks"), "sortOrder": "DESCENDING"}],
     }
-    resp = service.searchanalytics().query(siteUrl=SITE_URL, body=body).execute()
+    resp = _run_gsc_query(SITE_URL, body)
+    if resp is None:
+        return pd.DataFrame()
     rows = []
     for row in resp.get("rows", []):
         r = {d: row["keys"][i] for i, d in enumerate(g.get("dimensions", ["query"]))}
