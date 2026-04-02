@@ -157,6 +157,35 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+
+# ── PASSWORD GATE ─────────────────────────────────────────────────────────────
+def _check_password():
+    """Returns True if the user has entered the correct password."""
+    def _password_entered():
+        if st.session_state.get("_pw") == st.secrets.get("app_password", ""):
+            st.session_state["_pw_ok"] = True
+            del st.session_state["_pw"]
+        else:
+            st.session_state["_pw_ok"] = False
+
+    if st.session_state.get("_pw_ok", False):
+        return True
+
+    st.markdown(
+        "<div style='max-width:400px;margin:80px auto;text-align:center'>"
+        "<h2 style='color:#1F4E79;font-family:Arial'>Customer Success<br>Website Analytics Dashboard</h2>"
+        "<p style='color:#888;font-size:14px'>Enter the team password to continue</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.text_input("Password", type="password", key="_pw", on_change=_password_entered,
+                  label_visibility="collapsed", placeholder="Enter password...")
+    if "_pw_ok" in st.session_state and not st.session_state["_pw_ok"]:
+        st.error("Incorrect password. Please try again.")
+    st.stop()
+
+_check_password()
+
 # ── PROPERTY REGISTRY ────────────────────────────────────────────────────────
 # Name, GA4 ID, domain — GSC URL is auto-matched from your verified sites list
 PORTFOLIO = [
