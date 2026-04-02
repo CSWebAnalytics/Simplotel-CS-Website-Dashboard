@@ -178,10 +178,12 @@ def _check_password():
         "</div>",
         unsafe_allow_html=True,
     )
-    st.text_input("Password", type="password", key="_pw", on_change=_password_entered,
-                  label_visibility="collapsed", placeholder="Enter password...")
-    if "_pw_ok" in st.session_state and not st.session_state["_pw_ok"]:
-        st.error("Incorrect password. Please try again.")
+    _c1, _c2, _c3 = st.columns([1, 1, 1])
+    with _c2:
+        st.text_input("Password", type="password", key="_pw", on_change=_password_entered,
+                      label_visibility="collapsed", placeholder="Enter password...")
+        if "_pw_ok" in st.session_state and not st.session_state["_pw_ok"]:
+            st.error("Incorrect password. Please try again.")
     st.stop()
 
 _check_password()
