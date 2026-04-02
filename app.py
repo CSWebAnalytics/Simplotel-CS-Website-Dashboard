@@ -1527,66 +1527,69 @@ def get_credentials():
     return creds
 
 
-def get_fallback_credentials():
+def get_fallback_credentials_list():
     """
-    Returns SECONDARY service account credentials for overflow properties.
+    Returns a list of SECONDARY and TERTIARY service account credentials.
     Used when the primary service account hits Google's accounts-per-user limit.
-    Priority:
-      1. Streamlit Cloud — reads service_account_json_2 from st.secrets
-      2. Local — reads from second service account JSON file on disk
     """
     sa_scopes = [
         "https://www.googleapis.com/auth/analytics.readonly",
         "https://www.googleapis.com/auth/webmasters.readonly",
     ]
+    fallbacks = []
+    # Secondary service account (simplotel-dashboard-2)
     try:
         if hasattr(st, "secrets") and "service_account_json_2" in st.secrets:
             sa_info = json.loads(st.secrets["service_account_json_2"])
-            return service_account.Credentials.from_service_account_info(
-                sa_info, scopes=sa_scopes
-            )
+            fallbacks.append(service_account.Credentials.from_service_account_info(sa_info, scopes=sa_scopes))
     except Exception:
         pass
-    sa_file_2 = "cs-analytics-link-18eabe49b35f.json"
-    if os.path.exists(sa_file_2):
-        return service_account.Credentials.from_service_account_file(
-            sa_file_2, scopes=sa_scopes
-        )
-    return None
+    if not any("dashboard-2" in str(getattr(c, "service_account_email", "")) for c in fallbacks):
+        sa2 = "cs-analytics-link-18eabe49b35f.json"
+        if os.path.exists(sa2):
+            try: fallbacks.append(service_account.Credentials.from_service_account_file(sa2, scopes=sa_scopes))
+            except Exception: pass
+    # Tertiary service account (simplotel-dashboard-3)
+    try:
+        if hasattr(st, "secrets") and "service_account_json_3" in st.secrets:
+            sa_info = json.loads(st.secrets["service_account_json_3"])
+            fallbacks.append(service_account.Credentials.from_service_account_info(sa_info, scopes=sa_scopes))
+    except Exception:
+        pass
+    if not any("dashboard-3" in str(getattr(c, "service_account_email", "")) for c in fallbacks):
+        sa3 = "cs-analytics-link-dbdb3e9e2df8.json"
+        if os.path.exists(sa3):
+            try: fallbacks.append(service_account.Credentials.from_service_account_file(sa3, scopes=sa_scopes))
+            except Exception: pass
+    return fallbacks
 
-# ── FALLBACK HELPERS — try primary, retry with secondary on PermissionDenied ─
 def _run_ga4_report(req):
-    """Run a GA4 report. On PermissionDenied, retry with the fallback service account."""
+    """Run a GA4 report. On PermissionDenied, try each fallback service account."""
     creds  = get_credentials()
     client = BetaAnalyticsDataClient(credentials=creds)
     try:
         return client.run_report(req)
     except Exception as e:
         if _check_permission_error(e):
-            fb = get_fallback_credentials()
-            if fb:
-                try:
-                    return BetaAnalyticsDataClient(credentials=fb).run_report(req)
-                except Exception:
-                    pass
+            for fb in get_fallback_credentials_list():
+                try: return BetaAnalyticsDataClient(credentials=fb).run_report(req)
+                except Exception: continue
             return None
         raise
 
 def _run_gsc_query(site_url, body):
-    """Run a GSC query. On PermissionDenied, retry with the fallback service account."""
+    """Run a GSC query. On PermissionDenied, try each fallback service account."""
     creds   = get_credentials()
     service = build("searchconsole", "v1", credentials=creds)
     try:
         return service.searchanalytics().query(siteUrl=site_url, body=body).execute()
     except Exception as e:
         if _check_permission_error(e):
-            fb = get_fallback_credentials()
-            if fb:
+            for fb in get_fallback_credentials_list():
                 try:
-                    service2 = build("searchconsole", "v1", credentials=fb)
-                    return service2.searchanalytics().query(siteUrl=site_url, body=body).execute()
-                except Exception:
-                    pass
+                    s2 = build("searchconsole", "v1", credentials=fb)
+                    return s2.searchanalytics().query(siteUrl=site_url, body=body).execute()
+                except Exception: continue
             return None
         raise
 
@@ -2121,8 +2124,8 @@ for _k, _v in [
 _s  = st.session_state["dp_start"]
 _e  = st.session_state["dp_end"]
 _trigger_label = (
-    f"{st.session_state['dp_preset']}  "
-    f"{_s.strftime('%b %d')} – {_e.strftime('%b %d, %Y')} ▾"
+    f"{st.session_state['dp_preset']}  ·  "
+    f"{_s.strftime('%b %d')} – {_e.strftime('%b %d, %Y')}  ▾"
 )
 if st.sidebar.button(_trigger_label, key="dp_trigger", use_container_width=True):
     st.session_state["dp_open"]      = not st.session_state["dp_open"]
@@ -2162,86 +2165,6 @@ if st.session_state["dp_open"]:
             st.session_state["dp_tmp_end"] = _new_end
             st.rerun()
 
-    # Month navigation
-    _mn1, _mn2, _mn3 = st.sidebar.columns([1, 3, 1])
-    with _mn1:
-        if st.button("◀", key="dp_prev", use_container_width=True):
-            if _cm == 1:
-                st.session_state["dp_month"] = 12
-                st.session_state["dp_year"]  = _cy - 1
-            else:
-                st.session_state["dp_month"] = _cm - 1
-            st.rerun()
-    with _mn2:
-        st.markdown(
-            f"<div style='text-align:center;font-weight:600;font-size:13px;"
-            f"padding:6px 0;letter-spacing:0.5px'>"
-            f"{_cal.month_abbr[_cm].upper()} {_cy}</div>",
-            unsafe_allow_html=True
-        )
-    with _mn3:
-        if st.button("▶", key="dp_next", use_container_width=True):
-            if _cm == 12:
-                st.session_state["dp_month"] = 1
-                st.session_state["dp_year"]  = _cy + 1
-            else:
-                st.session_state["dp_month"] = _cm + 1
-            st.rerun()
-
-    # Day of week header
-    _hcols = st.sidebar.columns(7)
-    for _i, _lbl in enumerate(["S","M","T","W","T","F","S"]):
-        _hcols[_i].markdown(
-            f"<div style='text-align:center;font-size:11px;color:#888;"
-            f"font-weight:600;padding:2px 0'>{_lbl}</div>",
-            unsafe_allow_html=True
-        )
-
-    # Calendar grid — sunday-first to match screenshot
-    _weeks = _cal.monthcalendar(_cy, _cm)
-    # Reorder: monthcalendar returns Mon-first; shift to Sun-first
-    _sun_first = []
-    for _wk in _weeks:
-        _sun_first.append([_wk[6]] + _wk[:6])
-
-    for _wk in _sun_first:
-        _gc = st.sidebar.columns(7)
-        for _gi, _d in enumerate(_wk):
-            if _d == 0:
-                _gc[_gi].markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
-                continue
-            _td   = date(_cy, _cm, _d)
-            _i_s  = (_ts == _td)
-            _i_e  = (_te == _td)
-            _i_r  = (_ts and _te and _ts < _td < _te)
-            _i_t  = (_td == _cal_today)
-            if _i_s or _i_e:
-                _sty = "background:#1A73E8;color:#fff;border-radius:50%;font-weight:700"
-            elif _i_r:
-                _sty = "background:#E8F0FE;color:#1A73E8"
-            elif _i_t:
-                _sty = "color:#1A73E8;font-weight:700;border:1.5px solid #1A73E8;border-radius:50%"
-            else:
-                _sty = "color:inherit"
-            _gc[_gi].markdown(
-                f"<div style='text-align:center;font-size:12px;{_sty};"
-                f"padding:3px 0;line-height:1.6'>{_d}</div>",
-                unsafe_allow_html=True
-            )
-            if _gc[_gi].button("​", key=f"dp_{_cy}_{_cm}_{_d}", use_container_width=True):
-                if st.session_state["dp_step"] == "start" or st.session_state["dp_tmp_end"] is not None:
-                    st.session_state["dp_tmp_start"] = _td
-                    st.session_state["dp_tmp_end"]   = None
-                    st.session_state["dp_step"]      = "end"
-                else:
-                    _prev_start = st.session_state["dp_tmp_start"]
-                    if _td < _prev_start:
-                        st.session_state["dp_tmp_end"]   = _prev_start
-                        st.session_state["dp_tmp_start"] = _td
-                    else:
-                        st.session_state["dp_tmp_end"] = _td
-                    st.session_state["dp_step"] = "start"
-                st.rerun()
 
     # Apply / Cancel
     _ac1, _ac2 = st.sidebar.columns(2)
@@ -2786,7 +2709,7 @@ if _GA4_PERMISSION_ERROR:
         f"⚠️ The service account does not have access to this property (GA4 ID: {_GA4_PERMISSION_MSG}). "
         f"Charts will be empty. To fix: log into Google Analytics with the account that owns this property, "
         f"go to Admin → Account Access Management, and add "
-        f"simplotel-dashboard@cs-analytics-link.iam.gserviceaccount.com or simplotel-dashboard-2@cs-analytics-link.iam.gserviceaccount.com as Viewer.",
+        f"one of the service accounts (simplotel-dashboard / dashboard-2 / dashboard-3) @cs-analytics-link.iam.gserviceaccount.com as Viewer.",
         icon="🔒"
     )
 st.caption(
