@@ -2452,6 +2452,249 @@ st.sidebar.markdown("---")
 load = st.sidebar.button("Load / Refresh Data", type="primary", use_container_width=True)
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
+
+# ════════════════════════════════════════════════════════════════════
+# REPORT PAGE
+# ════════════════════════════════════════════════════════════════════
+if _page == "Report":
+    st.markdown("## Property report")
+    st.caption(f"{PROPERTIES[selected_label]['name']}  \u00b7  {start_date.strftime('%b %d')} \u2013 {end_date.strftime('%b %d, %Y')}")
+
+    # ── Download buttons ──────────────────────────────────────────────
+    _dl1, _dl2, _dl3, _dl4 = st.columns([2, 1, 1, 1])
+    with _dl1:
+        st.markdown("")
+    with _dl2:
+        _dl_word = st.button("\U0001f4c4 Word", key="dl_word", use_container_width=True)
+    with _dl3:
+        _dl_ppt = st.button("\U0001f4ca PPT", key="dl_ppt", use_container_width=True)
+    with _dl4:
+        _dl_pdf = st.button("\U0001f5d1 PDF", key="dl_pdf", use_container_width=True)
+
+    st.markdown("")
+
+    # ── Section checkboxes ────────────────────────────────────────────
+    st.markdown("**Include in report:**")
+    _chk_cols = st.columns(3)
+    with _chk_cols[0]:
+        _chk_overall  = st.checkbox("Overall traffic (YoY)", value=True, key="rpt_overall")
+        _chk_organic  = st.checkbox("Organic traffic (YoY)", value=True, key="rpt_organic")
+        _chk_engage   = st.checkbox("Engagement rate (12 months)", value=True, key="rpt_engage")
+    with _chk_cols[1]:
+        _chk_cities   = st.checkbox("Top 10 cities (6 months)", value=True, key="rpt_cities")
+        _chk_countries = st.checkbox("Top 10 countries (6 months)", value=True, key="rpt_countries")
+        _chk_device   = st.checkbox("Device categories (6 months)", value=True, key="rpt_device")
+    with _chk_cols[2]:
+        _chk_keywords = st.checkbox("Top 10 keywords", value=True, key="rpt_keywords")
+        _chk_clicks   = st.checkbox("Clicks (YoY)", value=True, key="rpt_clicks")
+        _chk_impr     = st.checkbox("Impressions (YoY)", value=True, key="rpt_impressions")
+
+    st.markdown("---")
+
+    # ── REPORT PREVIEW ─────────────────────────────────────────────────
+    st.markdown("### Report preview")
+    st.caption("This is exactly what will be downloaded.")
+
+    # ── Load data based on selections ─────────────────────────────────
+    with st.spinner("Loading report data..."):
+
+        # Overall Traffic (YoY)
+        if _chk_overall:
+            st.markdown("#### Overall traffic \u2014 Year-on-Year")
+            _rpt_yoy = get_ga4_monthly_yoy()
+            if not _rpt_yoy.empty:
+                _rpt_years = sorted(_rpt_yoy["year"].unique())
+                _fig_rpt_all = go.Figure()
+                for _yi, _yr in enumerate(_rpt_years):
+                    _df_y = _rpt_yoy[_rpt_yoy["year"] == _yr].set_index("month")
+                    _yvals = [int(_df_y.loc[m, "sessions"]) if m in _df_y.index else None for m in range(1, 13)]
+                    _fig_rpt_all.add_trace(go.Bar(
+                        name=str(_yr), x=MONTH_LABELS, y=_yvals,
+                        text=[f"{v:,}" if v else "" for v in _yvals],
+                        textposition="outside", textfont=dict(size=9),
+                        marker_color=YEAR_COLORS[_yi % len(YEAR_COLORS)], cliponaxis=False,
+                    ))
+                _max_all = _rpt_yoy["sessions"].max()
+                _fig_rpt_all.update_layout(**yoy_layout("Sessions"), height=380)
+                _fig_rpt_all.update_layout(yaxis=dict(range=[0, _max_all * 1.25]))
+                st.plotly_chart(_fig_rpt_all, use_container_width=True, key="rpt_fig_all")
+            st.markdown("")
+
+        # Organic Traffic (YoY)
+        if _chk_organic:
+            st.markdown("#### Organic traffic \u2014 Year-on-Year")
+            _rpt_org = get_ga4_monthly_yoy_organic()
+            if not _rpt_org.empty:
+                _rpt_org_years = sorted(_rpt_org["year"].unique())
+                _fig_rpt_org = go.Figure()
+                for _yi, _yr in enumerate(_rpt_org_years):
+                    _df_y = _rpt_org[_rpt_org["year"] == _yr].set_index("month")
+                    _yvals = [int(_df_y.loc[m, "sessions"]) if m in _df_y.index else None for m in range(1, 13)]
+                    _fig_rpt_org.add_trace(go.Bar(
+                        name=str(_yr), x=MONTH_LABELS, y=_yvals,
+                        text=[f"{v:,}" if v else "" for v in _yvals],
+                        textposition="outside", textfont=dict(size=9),
+                        marker_color=YEAR_COLORS[_yi % len(YEAR_COLORS)], cliponaxis=False,
+                    ))
+                _max_org = _rpt_org["sessions"].max()
+                _fig_rpt_org.update_layout(**yoy_layout("Organic Sessions"), height=380)
+                _fig_rpt_org.update_layout(yaxis=dict(range=[0, _max_org * 1.25]))
+                st.plotly_chart(_fig_rpt_org, use_container_width=True, key="rpt_fig_org")
+            st.markdown("")
+
+        # Engagement Rate (Past 12 months, Organic only)
+        if _chk_engage:
+            st.markdown("#### Engagement rate \u2014 Past 12 months (Organic Search only)")
+            _eng_s = date.today() - timedelta(days=365)
+            _eng_e = date.today() - timedelta(days=1)
+            _rpt_eng = get_ga4_monthly_engagement(_eng_s, _eng_e)
+            if not _rpt_eng.empty:
+                _fig_rpt_eng = go.Figure(go.Scatter(
+                    x=_rpt_eng["label"], y=_rpt_eng["engagement_rate"],
+                    mode="lines+markers+text",
+                    text=[f"{v}%" for v in _rpt_eng["engagement_rate"]],
+                    textposition="top center", textfont=dict(size=11),
+                    line=dict(color="#4C8BF5", width=2.5), marker=dict(size=7),
+                    fill="tozeroy", fillcolor="rgba(76,139,245,0.08)",
+                ))
+                _fig_rpt_eng.update_layout(
+                    **BASE, height=350,
+                    yaxis=dict(title="Engagement Rate (%)", gridcolor="#eeeeee", range=[0, 110]),
+                    xaxis=dict(tickfont=dict(size=11)),
+                    margin=dict(t=40, b=60, l=60, r=40),
+                )
+                _fig_rpt_eng.update_traces(cliponaxis=False)
+                st.plotly_chart(_fig_rpt_eng, use_container_width=True, key="rpt_fig_eng")
+            st.markdown("")
+
+        # Top 10 Cities (Past 6 months)
+        if _chk_cities:
+            st.markdown("#### Top 10 cities \u2014 Past 6 months (Organic Search)")
+            _rpt_cities = get_ga4_top_cities()
+            if not _rpt_cities.empty:
+                _max_c = _rpt_cities["Sessions"].max()
+                _fig_rpt_c = go.Figure(go.Bar(
+                    x=_rpt_cities["Sessions"], y=_rpt_cities["City"], orientation="h",
+                    marker_color="#4C8BF5",
+                    text=_rpt_cities["Sessions"].apply(lambda x: f"{x:,}"),
+                    textposition="outside", textfont=dict(size=11), cliponaxis=False,
+                ))
+                _fig_rpt_c.update_layout(**horiz_bar_layout("Sessions", _max_c), height=380)
+                st.plotly_chart(_fig_rpt_c, use_container_width=True, key="rpt_fig_cities")
+            st.markdown("")
+
+        # Top 10 Countries (Past 6 months)
+        if _chk_countries:
+            st.markdown("#### Top 10 countries \u2014 Past 6 months (Organic Search)")
+            _rpt_countries = get_ga4_top_countries()
+            if not _rpt_countries.empty:
+                _max_co = _rpt_countries["Sessions"].max()
+                _fig_rpt_co = go.Figure(go.Bar(
+                    x=_rpt_countries["Sessions"], y=_rpt_countries["Country"], orientation="h",
+                    marker_color="#34A853",
+                    text=_rpt_countries["Sessions"].apply(lambda x: f"{x:,}"),
+                    textposition="outside", textfont=dict(size=11), cliponaxis=False,
+                ))
+                _fig_rpt_co.update_layout(**horiz_bar_layout("Sessions", _max_co), height=380)
+                st.plotly_chart(_fig_rpt_co, use_container_width=True, key="rpt_fig_countries")
+            st.markdown("")
+
+        # Device Categories (Past 6 months, Organic only)
+        if _chk_device:
+            st.markdown("#### Device categories \u2014 Past 6 months")
+            _dev_s = date.today() - timedelta(days=180)
+            _dev_e = date.today() - timedelta(days=1)
+            _rpt_dev = get_ga4_device(_dev_s, _dev_e)
+            if not _rpt_dev.empty:
+                _dev_colors = ["#4C8BF5", "#34A853", "#FBBC04"]
+                _col_pie, _col_tbl = st.columns([1, 1])
+                with _col_pie:
+                    _fig_rpt_dev = go.Figure(go.Pie(
+                        labels=_rpt_dev["Device"], values=_rpt_dev["Sessions"], hole=0.45,
+                        marker=dict(colors=_dev_colors[:len(_rpt_dev)]),
+                        textinfo="label+percent+value", textfont=dict(size=12),
+                        texttemplate="%{label}<br>%{value:,} (%{percent})",
+                    ))
+                    _fig_rpt_dev.update_layout(**BASE, showlegend=False, height=320, margin=dict(t=20, b=20, l=20, r=20))
+                    st.plotly_chart(_fig_rpt_dev, use_container_width=True, key="rpt_fig_dev")
+                with _col_tbl:
+                    st.dataframe(_rpt_dev, use_container_width=True, hide_index=True)
+            st.markdown("")
+
+        # Top 10 Keywords
+        if _chk_keywords and gsc_available:
+            st.markdown("#### Top 10 keywords (Google Search Console)")
+            _rpt_kw = get_gsc_data(start_date, end_date)
+            if not _rpt_kw.empty:
+                st.dataframe(_rpt_kw.head(10), use_container_width=True, hide_index=True)
+            st.markdown("")
+        elif _chk_keywords and not gsc_available:
+            st.info("Google Search Console not configured for this property.")
+
+        # Clicks (YoY) — GSC monthly
+        if _chk_clicks and gsc_available:
+            st.markdown("#### Clicks \u2014 Year-on-Year (Google Search Console)")
+            _gsc_ytd_start = date(date.today().year - 1, 1, 1)
+            _gsc_ytd_end = date.today()
+            _brand_df, _nonbrand_df = get_gsc_brand_nonbrand(_gsc_ytd_start, _gsc_ytd_end)
+            if not _brand_df.empty or not _nonbrand_df.empty:
+                # Combine brand + nonbrand for total clicks
+                import datetime as _dtt_rpt
+                _all_gsc = pd.concat([_brand_df, _nonbrand_df], ignore_index=True) if not _brand_df.empty and not _nonbrand_df.empty else (_brand_df if not _brand_df.empty else _nonbrand_df)
+                if not _all_gsc.empty:
+                    _all_gsc_agg = _all_gsc.groupby("month").agg({"clicks": "sum"}).reset_index()
+                    _all_gsc_agg["month_str"] = _all_gsc_agg["month"].astype(str)
+                    _all_gsc_agg["year"] = _all_gsc_agg["month_str"].str[:4]
+                    _this_yr = str(date.today().year)
+                    _last_yr = str(date.today().year - 1)
+                    def _fmt_m(s):
+                        try: return _dtt_rpt.datetime.strptime(str(s), "%Y-%m").strftime("%b")
+                        except: return str(s)
+                    _fig_rpt_clicks = go.Figure()
+                    for _yi, _yr in enumerate([_last_yr, _this_yr]):
+                        _df_yr = _all_gsc_agg[_all_gsc_agg["year"] == _yr].copy()
+                        _df_yr["month_label"] = _df_yr["month_str"].apply(_fmt_m)
+                        _fig_rpt_clicks.add_trace(go.Bar(
+                            name=_yr, x=_df_yr["month_label"], y=_df_yr["clicks"],
+                            text=_df_yr["clicks"].apply(lambda v: f"{v:,}"),
+                            textposition="outside", textfont=dict(size=9),
+                            marker_color=YEAR_COLORS[_yi % len(YEAR_COLORS)], cliponaxis=False,
+                        ))
+                    _fig_rpt_clicks.update_layout(**yoy_layout("Clicks"), height=380)
+                    st.plotly_chart(_fig_rpt_clicks, use_container_width=True, key="rpt_fig_clicks")
+            st.markdown("")
+
+        # Impressions (YoY) — GSC monthly
+        if _chk_impr and gsc_available:
+            st.markdown("#### Impressions \u2014 Year-on-Year (Google Search Console)")
+            if not _brand_df.empty or not _nonbrand_df.empty:
+                _all_gsc2 = pd.concat([_brand_df, _nonbrand_df], ignore_index=True) if not _brand_df.empty and not _nonbrand_df.empty else (_brand_df if not _brand_df.empty else _nonbrand_df)
+                if not _all_gsc2.empty:
+                    _all_gsc_agg2 = _all_gsc2.groupby("month").agg({"impressions": "sum"}).reset_index()
+                    _all_gsc_agg2["month_str"] = _all_gsc_agg2["month"].astype(str)
+                    _all_gsc_agg2["year"] = _all_gsc_agg2["month_str"].str[:4]
+                    _fig_rpt_impr = go.Figure()
+                    for _yi, _yr in enumerate([_last_yr, _this_yr]):
+                        _df_yr2 = _all_gsc_agg2[_all_gsc_agg2["year"] == _yr].copy()
+                        _df_yr2["month_label"] = _df_yr2["month_str"].apply(_fmt_m)
+                        _fig_rpt_impr.add_trace(go.Bar(
+                            name=_yr, x=_df_yr2["month_label"], y=_df_yr2["impressions"],
+                            text=_df_yr2["impressions"].apply(lambda v: f"{v:,}"),
+                            textposition="outside", textfont=dict(size=9),
+                            marker_color=YEAR_COLORS[_yi % len(YEAR_COLORS)], cliponaxis=False,
+                        ))
+                    _fig_rpt_impr.update_layout(**yoy_layout("Impressions"), height=380)
+                    st.plotly_chart(_fig_rpt_impr, use_container_width=True, key="rpt_fig_impr")
+            st.markdown("")
+
+    st.markdown("---")
+    st.caption("Download buttons will generate this report in your chosen format.")
+
+    st.stop()  # Don't show dashboard below
+
+# ════════════════════════════════════════════════════════════════════
+# DASHBOARD PAGE (original content continues below)
+# ════════════════════════════════════════════════════════════════════
 st.title("Customer Success Website Analytics Dashboard")
 st.caption("Live data — Google Analytics 4 & Google Search Console")
 
@@ -3730,25 +3973,7 @@ else:
     c2.metric("Top Channel",              top_channel)
     c3.metric("Organic Engagement Rate",  org_eng_val)
 
-    if compare:
-        df_ga4_prev = get_ga4_data(prev_start, prev_end)
-        fig_ga4 = go.Figure()
-        fig_ga4.add_trace(go.Bar(
-            name=f"Current  ({start_date.strftime('%d %b')} – {end_date.strftime('%d %b %Y')})",
-            x=df_ga4["channel"], y=df_ga4["sessions"],
-            marker_color="#4C8BF5",
-            text=df_ga4["sessions"].apply(lambda x: f"{x:,}"),
-            textposition="outside", textfont=dict(size=11), cliponaxis=False,
-        ))
-        fig_ga4.add_trace(go.Bar(
-            name=f"Previous ({prev_start.strftime('%d %b')} – {prev_end.strftime('%d %b %Y')})",
-            x=df_ga4_prev["channel"], y=df_ga4_prev["sessions"],
-            marker_color="#AACDE8",
-            text=df_ga4_prev["sessions"].apply(lambda x: f"{x:,}"),
-            textposition="outside", textfont=dict(size=11), cliponaxis=False,
-        ))
-    else:
-        fig_ga4 = go.Figure(go.Bar(
+    fig_ga4 = go.Figure(go.Bar(
             x=df_ga4["channel"], y=df_ga4["sessions"],
             text=df_ga4["sessions"].apply(lambda x: f"{x:,}"),
             textposition="outside", textfont=dict(size=12),
@@ -3765,22 +3990,7 @@ else:
     )
     st.plotly_chart(fig_ga4, use_container_width=True, key="fig_ga4_custom")
 
-    # Auto-generate delta metrics when compare is on
-    if compare and not df_ga4_prev.empty:
-        st.markdown("**Channel comparison — period over period**")
-        _prev_dict = dict(zip(df_ga4_prev["channel"], df_ga4_prev["sessions"]))
-        _delta_cols = st.columns(min(len(df_ga4), 5))
-        for _ci, (_, _row) in enumerate(df_ga4.iterrows()):
-            if _ci >= 5:
-                break
-            _prev_val = _prev_dict.get(_row["channel"], 0)
-            _delta_n  = _row["sessions"] - _prev_val
-            _pct      = round(_delta_n / _prev_val * 100, 1) if _prev_val > 0 else 0
-            _delta_cols[_ci].metric(
-                label=_row["channel"][:16],
-                value=f"{_row['sessions']:,}",
-                delta=f"{_pct:+.1f}%"
-            )
+
 
 # ── GSC TOP KEYWORDS ──────────────────────────────────────────────────────
 st.markdown("### Google Search Console — Top Keywords")
