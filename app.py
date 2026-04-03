@@ -2584,7 +2584,7 @@ if _page == "Report":
                     text=_rpt_cities["Sessions"].apply(lambda x: f"{x:,}"),
                     textposition="outside", textfont=dict(size=11), cliponaxis=False,
                 ))
-                _fig_rpt_c.update_layout(**horiz_bar_layout("Sessions", _max_c), height=380)
+                _fig_rpt_c.update_layout(**{**horiz_bar_layout("Sessions", _max_c), "height": 380})
                 st.plotly_chart(_fig_rpt_c, use_container_width=True, key="rpt_fig_cities")
             st.markdown("")
 
@@ -2600,7 +2600,7 @@ if _page == "Report":
                     text=_rpt_countries["Sessions"].apply(lambda x: f"{x:,}"),
                     textposition="outside", textfont=dict(size=11), cliponaxis=False,
                 ))
-                _fig_rpt_co.update_layout(**horiz_bar_layout("Sessions", _max_co), height=380)
+                _fig_rpt_co.update_layout(**{**horiz_bar_layout("Sessions", _max_co), "height": 380})
                 st.plotly_chart(_fig_rpt_co, use_container_width=True, key="rpt_fig_countries")
             st.markdown("")
 
