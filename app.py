@@ -2458,6 +2458,162 @@ load = st.sidebar.button("Load / Refresh Data", type="primary", use_container_wi
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
+
+# ── REPORT FILE GENERATORS ────────────────────────────────────────────────────
+def _generate_word_report(property_name, date_label, sections):
+    """Generate a Word document from report sections."""
+    from docx import Document as DocxDoc
+    from docx.shared import Inches, Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    doc = DocxDoc()
+    style = doc.styles["Normal"]
+    style.font.name = "Arial"
+    style.font.size = Pt(11)
+    # Title
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(property_name)
+    r.bold = True
+    r.font.size = Pt(22)
+    r.font.color.rgb = RGBColor(0x1F, 0x4E, 0x79)
+    p2 = doc.add_paragraph()
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r2 = p2.add_run(f"Website Performance Report  |  {date_label}")
+    r2.font.size = Pt(12)
+    r2.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+    doc.add_paragraph("")
+    for section in sections:
+        doc.add_heading(section["title"], level=2)
+        if "df" in section and section["df"] is not None and not section["df"].empty:
+            df = section["df"]
+            table = doc.add_table(rows=1, cols=len(df.columns))
+            table.style = "Light Grid Accent 1"
+            for j, col in enumerate(df.columns):
+                table.rows[0].cells[j].text = str(col)
+            for _, row in df.iterrows():
+                cells = table.add_row().cells
+                for j, col in enumerate(df.columns):
+                    val = row[col]
+                    if isinstance(val, float):
+                        cells[j].text = f"{val:,.1f}" if val != int(val) else f"{int(val):,}"
+                    elif isinstance(val, int):
+                        cells[j].text = f"{val:,}"
+                    else:
+                        cells[j].text = str(val)
+        if "summary" in section:
+            doc.add_paragraph(section["summary"])
+        doc.add_paragraph("")
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+def _generate_pptx_report(property_name, date_label, sections):
+    """Generate a PowerPoint from report sections."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt, Emu
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+    prs = Presentation()
+    prs.slide_width = Emu(12192000)
+    prs.slide_height = Emu(6858000)
+    # Title slide
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    txBox = slide.shapes.add_textbox(Emu(914400), Emu(2286000), Emu(10363200), Emu(1828800))
+    tf = txBox.text_frame
+    p = tf.paragraphs[0]
+    p.text = property_name
+    p.font.size = Pt(36)
+    p.font.bold = True
+    p.font.color.rgb = RGBColor(0x1F, 0x4E, 0x79)
+    p.alignment = PP_ALIGN.CENTER
+    p2 = tf.add_paragraph()
+    p2.text = f"Website Performance Report  |  {date_label}"
+    p2.font.size = Pt(16)
+    p2.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+    p2.alignment = PP_ALIGN.CENTER
+    for section in sections:
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        # Section title
+        txBox = slide.shapes.add_textbox(Emu(457200), Emu(274638), Emu(11277600), Emu(548640))
+        tf = txBox.text_frame
+        p = tf.paragraphs[0]
+        p.text = section["title"]
+        p.font.size = Pt(24)
+        p.font.bold = True
+        p.font.color.rgb = RGBColor(0x1F, 0x4E, 0x79)
+        if "df" in section and section["df"] is not None and not section["df"].empty:
+            df = section["df"]
+            rows_count = min(len(df) + 1, 16)
+            cols_count = min(len(df.columns), 6)
+            tbl = slide.shapes.add_table(
+                rows_count, cols_count,
+                Emu(457200), Emu(1097280),
+                Emu(11277600), Emu(min(rows_count * 365760, 4572000))
+            ).table
+            for j in range(cols_count):
+                cell = tbl.cell(0, j)
+                cell.text = str(df.columns[j])
+                for paragraph in cell.text_frame.paragraphs:
+                    paragraph.font.size = Pt(10)
+                    paragraph.font.bold = True
+            for i in range(min(len(df), rows_count - 1)):
+                for j in range(cols_count):
+                    cell = tbl.cell(i + 1, j)
+                    val = df.iloc[i, j]
+                    if isinstance(val, float):
+                        cell.text = f"{val:,.1f}" if val != int(val) else f"{int(val):,}"
+                    elif isinstance(val, int):
+                        cell.text = f"{val:,}"
+                    else:
+                        cell.text = str(val)
+                    for paragraph in cell.text_frame.paragraphs:
+                        paragraph.font.size = Pt(9)
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+def _generate_pdf_report(property_name, date_label, sections):
+    """Generate a simple PDF from report sections using basic HTML."""
+    html = f"""<html><head><style>
+    body {{ font-family: Arial; margin: 40px; color: #333; }}
+    h1 {{ color: #1F4E79; text-align: center; }}
+    h2 {{ color: #1F4E79; border-bottom: 1px solid #ddd; padding-bottom: 4px; }}
+    .subtitle {{ text-align: center; color: #888; margin-bottom: 30px; }}
+    table {{ border-collapse: collapse; width: 100%; margin: 10px 0 20px 0; font-size: 11px; }}
+    th {{ background: #1F4E79; color: white; padding: 6px 8px; text-align: left; }}
+    td {{ padding: 5px 8px; border-bottom: 1px solid #eee; }}
+    tr:nth-child(even) {{ background: #f9f9f9; }}
+    </style></head><body>
+    <h1>{property_name}</h1>
+    <p class="subtitle">Website Performance Report  |  {date_label}</p>
+    """
+    for section in sections:
+        html += f"<h2>{section['title']}</h2>"
+        if "df" in section and section["df"] is not None and not section["df"].empty:
+            df = section["df"]
+            html += "<table><tr>"
+            for col in df.columns:
+                html += f"<th>{col}</th>"
+            html += "</tr>"
+            for _, row in df.iterrows():
+                html += "<tr>"
+                for col in df.columns:
+                    val = row[col]
+                    if isinstance(val, float):
+                        html += f"<td>{val:,.1f}</td>" if val != int(val) else f"<td>{int(val):,}</td>"
+                    elif isinstance(val, int):
+                        html += f"<td>{val:,}</td>"
+                    else:
+                        html += f"<td>{val}</td>"
+                html += "</tr>"
+            html += "</table>"
+        if "summary" in section:
+            html += f"<p>{section['summary']}</p>"
+    html += "</body></html>"
+    return html.encode("utf-8")
+
 # ════════════════════════════════════════════════════════════════════
 # REPORT PAGE
 # ════════════════════════════════════════════════════════════════════
@@ -2465,16 +2621,8 @@ if _page == "Report":
     st.markdown("## Property report")
     st.caption(f"{PROPERTIES[selected_label]['name']}  \u00b7  {start_date.strftime('%b %d')} \u2013 {end_date.strftime('%b %d, %Y')}")
 
-    # ── Download buttons ──────────────────────────────────────────────
-    _dl1, _dl2, _dl3, _dl4 = st.columns([2, 1, 1, 1])
-    with _dl1:
-        st.markdown("")
-    with _dl2:
-        _dl_word = st.button("\U0001f4c4 Word", key="dl_word", use_container_width=True)
-    with _dl3:
-        _dl_ppt = st.button("\U0001f4ca PPT", key="dl_ppt", use_container_width=True)
-    with _dl4:
-        _dl_pdf = st.button("\U0001f5d1 PDF", key="dl_pdf", use_container_width=True)
+    # ── Download buttons (generated after preview loads) ─────────────
+    _dl_placeholder = st.container()
 
     st.markdown("")
 
@@ -2692,8 +2840,73 @@ if _page == "Report":
                     st.plotly_chart(_fig_rpt_impr, use_container_width=True, key="rpt_fig_impr")
             st.markdown("")
 
+    # ── Collect report sections for download ──────────────────────────
+    _report_sections = []
+    if _chk_overall and "_rpt_yoy" in dir() and not _rpt_yoy.empty:
+        _rpt_yoy_table = _rpt_yoy.copy()
+        _rpt_yoy_table["Month"] = _rpt_yoy_table["month"].apply(lambda m: MONTH_LABELS[int(m)-1])
+        _rpt_yoy_pivot = _rpt_yoy_table.pivot_table(index="Month", columns="year", values="sessions", aggfunc="sum").reset_index()
+        _rpt_yoy_pivot.columns = [str(c) for c in _rpt_yoy_pivot.columns]
+        _report_sections.append({"title": "Overall Traffic — Year-on-Year", "df": _rpt_yoy_pivot})
+    if _chk_organic and "_rpt_org" in dir() and not _rpt_org.empty:
+        _rpt_org_table = _rpt_org.copy()
+        _rpt_org_table["Month"] = _rpt_org_table["month"].apply(lambda m: MONTH_LABELS[int(m)-1])
+        _rpt_org_pivot = _rpt_org_table.pivot_table(index="Month", columns="year", values="sessions", aggfunc="sum").reset_index()
+        _rpt_org_pivot.columns = [str(c) for c in _rpt_org_pivot.columns]
+        _report_sections.append({"title": "Organic Traffic — Year-on-Year", "df": _rpt_org_pivot})
+    if _chk_engage and "_rpt_eng" in dir() and not _rpt_eng.empty:
+        _report_sections.append({"title": "Engagement Rate — Past 12 Months (Organic)", "df": _rpt_eng[["label", "engagement_rate"]].rename(columns={"label": "Month", "engagement_rate": "Engagement Rate (%)"})})
+    if _chk_cities and "_rpt_cities" in dir() and not _rpt_cities.empty:
+        _report_sections.append({"title": "Top 10 Cities — Past 6 Months", "df": _rpt_cities})
+    if _chk_countries and "_rpt_countries" in dir() and not _rpt_countries.empty:
+        _report_sections.append({"title": "Top 10 Countries — Past 6 Months", "df": _rpt_countries})
+    if _chk_device and "_rpt_dev" in dir() and not _rpt_dev.empty:
+        _report_sections.append({"title": "Device Categories — Past 6 Months", "df": _rpt_dev})
+    if _chk_keywords and "_rpt_kw" in dir() and not _rpt_kw.empty:
+        _report_sections.append({"title": "Top 10 Keywords", "df": _rpt_kw.head(10)})
+    if _chk_clicks and "_all_gsc_agg" in dir() and not _all_gsc_agg.empty:
+        _clicks_table = _all_gsc_agg.copy()
+        _clicks_table["Month"] = _clicks_table["month"].astype(str)
+        _report_sections.append({"title": "Clicks — Year-on-Year", "df": _clicks_table[["Month", "clicks"]].rename(columns={"clicks": "Clicks"})})
+    if _chk_impr and "_all_gsc_agg2" in dir() and not _all_gsc_agg2.empty:
+        _impr_table = _all_gsc_agg2.copy()
+        _impr_table["Month"] = _impr_table["month"].astype(str)
+        _report_sections.append({"title": "Impressions — Year-on-Year", "df": _impr_table[["Month", "impressions"]].rename(columns={"impressions": "Impressions"})})
+
+    _date_label = f"{start_date.strftime('%b %d')} \u2013 {end_date.strftime('%b %d, %Y')}"
+    _prop_name = PROPERTIES[selected_label]["name"]
+
+    # ── Render download buttons ───────────────────────────────────────
+    with _dl_placeholder:
+        _dlc1, _dlc2, _dlc3, _dlc4 = st.columns([2, 1, 1, 1])
+        with _dlc1:
+            st.markdown("")
+        with _dlc2:
+            _word_bytes = _generate_word_report(_prop_name, _date_label, _report_sections)
+            st.download_button(
+                "\U0001f4c4 Word", data=_word_bytes,
+                file_name=f"{_prop_name}_report_{date.today()}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="dl_word", use_container_width=True,
+            )
+        with _dlc3:
+            _pptx_bytes = _generate_pptx_report(_prop_name, _date_label, _report_sections)
+            st.download_button(
+                "\U0001f4ca PPT", data=_pptx_bytes,
+                file_name=f"{_prop_name}_report_{date.today()}.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                key="dl_ppt", use_container_width=True,
+            )
+        with _dlc4:
+            _pdf_bytes = _generate_pdf_report(_prop_name, _date_label, _report_sections)
+            st.download_button(
+                "\U0001f5d1 PDF (HTML)", data=_pdf_bytes,
+                file_name=f"{_prop_name}_report_{date.today()}.html",
+                mime="text/html",
+                key="dl_pdf", use_container_width=True,
+            )
+
     st.markdown("---")
-    st.caption("Download buttons will generate this report in your chosen format.")
 
     st.stop()  # Don't show dashboard below
 
