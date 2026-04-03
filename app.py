@@ -3038,6 +3038,7 @@ def generate_insight_with_charts(user_query, df, api_key, property_name):
     
     result = {"charts": [], "table": {"show": True, "columns": [], "rows": []}, "insight": ""}
     
+    _claude_ok = False
     if _use_claude and anthropic_key:
         try:
             ac = anthropic.Anthropic(api_key=anthropic_key)
@@ -3051,9 +3052,10 @@ def generate_insight_with_charts(user_query, df, api_key, property_name):
             raw = raw.replace("```json", "").replace("```", "").strip()
             result = json.loads(raw)
             result["_provider"] = "claude"
+            _claude_ok = True
         except Exception as _e:
-            result["insight"] = f"Claude chart error: {str(_e)[:200]}"
-    elif api_key:
+            pass  # Fall through to Groq
+    if not _claude_ok and api_key:
         try:
             groq_client = Groq(api_key=api_key)
             response = groq_client.chat.completions.create(
@@ -3066,7 +3068,7 @@ def generate_insight_with_charts(user_query, df, api_key, property_name):
             result = json.loads(raw)
             result["_provider"] = "groq_fallback"
         except Exception as _e:
-            result["insight"] = f"AI error: {str(_e)[:200]}"
+            result["insight"] = f"Groq error: {str(_e)[:200]}"
     else:
         result["insight"] = "No AI provider available."
     
