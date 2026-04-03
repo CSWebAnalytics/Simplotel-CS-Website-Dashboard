@@ -2972,6 +2972,202 @@ def render_query_charts(df, instruction):
 
     return figures
 
+
+def generate_insight_with_charts(user_query, df, api_key, property_name):
+    """
+    Send raw data to Claude. Claude returns chart specs + table format + insight text.
+    Claude is the chart specialist — it sees actual data and decides how to present it.
+    """
+    data_str = df.to_string(index=False, max_rows=30)
+    if len(data_str) > 3000:
+        data_str = data_str[:3000] + "\n[... data truncated]"
+    
+    knowledge_context, _ = search_knowledge(f"{property_name} {user_query}")
+    knowledge_block = ""
+    if knowledge_context:
+        knowledge_block = "\n\nINSTITUTIONAL KNOWLEDGE:\n" + knowledge_context
+    
+    prompt = (
+        "You are a senior hotel website analytics expert AND data visualization specialist.\n"
+        f"Property: {property_name}\n"
+        f"Query: {user_query}\n\n"
+        f"LIVE DATA from Google Analytics 4 / Google Search Console:\n\n{data_str}\n"
+        f"{knowledge_block}\n\n"
+        "Analyse the data and return ONLY a valid JSON object (no markdown fences, no explanation outside JSON):\n\n"
+        "{\n"
+        "  \"charts\": [\n"
+        "    {\n"
+        "      \"type\": \"bar\" | \"horizontal_bar\" | \"line\" | \"pie\",\n"
+        "      \"title\": \"Chart title\",\n"
+        "      \"x_labels\": [\"Jan 2024\", \"Feb 2024\", ...],\n"
+        "      \"series\": [{\"name\": \"Series name\", \"values\": [100, 200, ...]}]\n"
+        "    }\n"
+        "  ],\n"
+        "  \"table\": {\n"
+        "    \"show\": true/false,\n"
+        "    \"columns\": [\"Column 1\", \"Column 2\"],\n"
+        "    \"rows\": [[\"row1val1\", \"row1val2\"], ...]\n"
+        "  },\n"
+        "  \"insight\": \"Your analytical text here\"\n"
+        "}\n\n"
+        "CHART RULES:\n"
+        "- Return 0, 1, or MULTIPLE charts depending on the query.\n"
+        "- Return empty charts list [] if data is better shown as table + text only.\n"
+        "- Choose the RIGHT chart type by looking at the actual data:\n"
+        "  * line: for time series (combine year+month into readable labels like Jan 2024, Feb 2024)\n"
+        "  * bar: for comparing categories (channels, devices, countries)\n"
+        "  * horizontal_bar: when labels are long (keywords, landing pages, cities)\n"
+        "  * pie: for proportions/share of total (use sparingly)\n"
+        "- For multi-year monthly data: create ONE line chart with separate series per year.\n"
+        "  x_labels should be month names: [Jan, Feb, Mar, ...]. Each year is a separate series.\n"
+        "- x_labels and series values MUST have the same length.\n"
+        "- NEVER plot raw month numbers (1,2,3). Always use readable labels.\n"
+        "- All values in series must be numbers, not strings.\n\n"
+        "TABLE RULES:\n"
+        "- Use readable column names (Channel not sessionDefaultChannelGroup, CTR (%) not ctr).\n"
+        "- Sort by the most important metric descending.\n"
+        "- Limit to 15-20 rows max. Format numbers with commas.\n"
+        "- show=false if the charts already tell the full story.\n\n"
+        "INSIGHT RULES:\n"
+        "- EVERY claim MUST cite a specific number from the data. No invented numbers.\n"
+        "- Structure: 1) Direct answer with numbers. 2) 3-5 bullet observations. 3) One actionable recommendation.\n"
+        "- Reference knowledge base benchmarks where relevant, clearly distinguishing them from live data.\n"
+        "- If data does not contain the answer, say so.\n\n"
+        "Return ONLY the JSON. No markdown fences."
+    )
+    
+    result = {"charts": [], "table": {"show": True, "columns": [], "rows": []}, "insight": ""}
+    
+    if _use_claude and anthropic_key:
+        try:
+            ac = anthropic.Anthropic(api_key=anthropic_key)
+            response = ac.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2048,
+                temperature=0.2,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text.strip()
+            raw = raw.replace("```json", "").replace("```", "").strip()
+            result = json.loads(raw)
+            result["_provider"] = "claude"
+        except Exception as _e:
+            result["insight"] = f"Claude chart error: {str(_e)[:200]}"
+    elif api_key:
+        try:
+            groq_client = Groq(api_key=api_key)
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2, max_tokens=2048,
+            )
+            raw = response.choices[0].message.content.strip()
+            raw = raw.replace("```json", "").replace("```", "").strip()
+            result = json.loads(raw)
+            result["_provider"] = "groq_fallback"
+        except Exception as _e:
+            result["insight"] = f"AI error: {str(_e)[:200]}"
+    else:
+        result["insight"] = "No AI provider available."
+    
+    return result
+
+def render_charts_from_claude(chart_specs):
+    """
+    Render Plotly figures from Claude-generated chart specifications.
+    Claude already decided the chart type, labels, and data layout.
+    """
+    COLORS = ["#4C8BF5", "#34A853", "#EA4335", "#FBBC04", "#9C27B0", "#00BCD4", "#FF5722", "#795548"]
+    figures = []
+    
+    for spec in chart_specs:
+        chart_type = spec.get("type", "bar")
+        title = spec.get("title", "")
+        x_labels = spec.get("x_labels", [])
+        series_list = spec.get("series", [])
+        
+        if not x_labels or not series_list:
+            continue
+        
+        fig = go.Figure()
+        
+        if chart_type == "line":
+            for si, s in enumerate(series_list):
+                fig.add_trace(go.Scatter(
+                    name=s.get("name", f"Series {si+1}"),
+                    x=x_labels, y=s.get("values", []),
+                    mode="lines+markers+text",
+                    text=[f"{v:,}" if isinstance(v, (int, float)) else str(v) for v in s.get("values", [])],
+                    textposition="top center", textfont=dict(size=9),
+                    line=dict(color=COLORS[si % len(COLORS)], width=2.5),
+                    marker=dict(size=6),
+                ))
+            all_vals = [v for s in series_list for v in s.get("values", []) if isinstance(v, (int, float))]
+            max_y = max(all_vals) if all_vals else 1
+            fig.update_layout(
+                yaxis=dict(gridcolor="#eeeeee", tickformat=",", range=[0, max_y * 1.25]),
+                xaxis=dict(tickfont=dict(size=11)),
+            )
+        
+        elif chart_type == "horizontal_bar":
+            for si, s in enumerate(series_list):
+                vals = s.get("values", [])
+                fig.add_trace(go.Bar(
+                    name=s.get("name", f"Series {si+1}"),
+                    y=x_labels, x=vals, orientation="h",
+                    marker_color=COLORS[si % len(COLORS)],
+                    text=[f"{v:,}" if isinstance(v, (int, float)) else str(v) for v in vals],
+                    textposition="outside", textfont=dict(size=10), cliponaxis=False,
+                ))
+            all_vals = [v for s in series_list for v in s.get("values", []) if isinstance(v, (int, float))]
+            max_x = max(all_vals) if all_vals else 1
+            fig.update_layout(
+                xaxis=dict(gridcolor="#eeeeee", tickformat=",", range=[0, max_x * 1.35]),
+                yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
+                margin=dict(t=60, b=60, l=180, r=80),
+            )
+        
+        elif chart_type == "pie":
+            vals = series_list[0].get("values", []) if series_list else []
+            fig.add_trace(go.Pie(
+                labels=x_labels, values=vals, hole=0.4,
+                marker=dict(colors=COLORS[:len(x_labels)]),
+                textinfo="label+percent+value", textfont=dict(size=11),
+            ))
+            fig.update_layout(showlegend=False, margin=dict(t=60, b=30, l=30, r=30))
+        
+        else:  # bar
+            for si, s in enumerate(series_list):
+                vals = s.get("values", [])
+                fig.add_trace(go.Bar(
+                    name=s.get("name", f"Series {si+1}"),
+                    x=x_labels, y=vals,
+                    marker_color=COLORS[si % len(COLORS)],
+                    text=[f"{v:,}" if isinstance(v, (int, float)) else str(v) for v in vals],
+                    textposition="outside", textfont=dict(size=10), cliponaxis=False,
+                ))
+            all_vals = [v for s in series_list for v in s.get("values", []) if isinstance(v, (int, float))]
+            max_y = max(all_vals) if all_vals else 1
+            fig.update_layout(
+                yaxis=dict(gridcolor="#eeeeee", tickformat=",", range=[0, max_y * 1.25]),
+                xaxis=dict(tickfont=dict(size=11), tickangle=-30 if len(x_labels) > 8 else 0),
+            )
+        
+        show_legend = len(series_list) > 1
+        fig.update_layout(
+            title=dict(text=title, font=dict(size=15, family="Arial")),
+            plot_bgcolor="white", paper_bgcolor="white",
+            font=dict(family="Arial", size=13),
+            barmode="group" if len(series_list) > 1 else "relative",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5, font=dict(size=12)) if show_legend else {},
+            showlegend=show_legend,
+            margin=dict(t=70, b=80, l=60, r=40) if chart_type not in ("horizontal_bar", "pie") else {},
+            height=420,
+        )
+        figures.append(fig)
+    
+    return figures
+
 # ── Excel builder ─────────────────────────────────────────────────────────
 def build_excel(query_results):
     """
@@ -3055,10 +3251,13 @@ if run_query:
                     # Generate text insight — pass full data including both periods
                     with st.spinner("Generating insight..."):
                         try:
-                            text_insight = generate_text_insight(
+                            _ai_res = generate_insight_with_charts(
                                 user_query, df_result, groq_key or "",
                                 PROPERTIES[selected_label]["name"]
                             )
+                        text_insight = _ai_res.get("insight", "")
+                        # Store ai_result for chart/table rendering
+                        _current_ai_result = _ai_res
                         except Exception:
                             text_insight = ""
                     st.session_state["query_results"].append({
@@ -3101,32 +3300,33 @@ if st.session_state["query_results"]:
                 st.markdown("#### 💡 AI Insight")
                 st.info(result["insight"])
 
-            # ── Charts (0, 1, or multiple) ────────────────────────────────
-            _chart_figs = render_query_charts(result["df"], result["instruction"])
-            for _fi, _fig in enumerate(_chart_figs):
-                st.plotly_chart(_fig, use_container_width=True, key=f"qchart_{i}_{_fi}")
+            # ── Charts (Claude-generated) ─────────────────────────────────
+            _ai_result = result.get("ai_result", {})
+            _claude_charts = _ai_result.get("charts", [])
+            if _claude_charts:
+                _cfigs = render_charts_from_claude(_claude_charts)
+                for _fi, _fig in enumerate(_cfigs):
+                    st.plotly_chart(_fig, use_container_width=True, key=f"qchart_{i}_{_fi}")
 
-            # ── Smart Data Table ──────────────────────────────────────────
-            _df_show = result["df"].copy()
-            _tspec = result["instruction"].get("table", {})
-            if isinstance(_tspec, dict):
-                _tcols = _tspec.get("columns")
-                if _tcols:
-                    _valid = [c for c in _tcols if c in _df_show.columns]
-                    if _valid:
-                        _df_show = _df_show[_valid]
-                _tlabels = _tspec.get("column_labels")
-                if _tlabels:
-                    _rmap = {k: v for k, v in _tlabels.items() if k in _df_show.columns}
-                    if _rmap:
-                        _df_show = _df_show.rename(columns=_rmap)
-                _tsort = _tspec.get("sort_by", "")
-                if _tsort and _tsort in _df_show.columns:
-                    _df_show = _df_show.sort_values(_tsort, ascending=not _tspec.get("sort_desc", True))
-                _tlimit = _tspec.get("limit", 25)
-                _df_show = _df_show.head(_tlimit)
-            if _tspec.get("show", True) if isinstance(_tspec, dict) else True:
-                st.dataframe(_df_show, use_container_width=True, hide_index=True)
+            # ── Table (Claude-formatted) ──────────────────────────────────
+            _ai_table = _ai_result.get("table", {})
+            if isinstance(_ai_table, dict) and _ai_table.get("show", True) and _ai_table.get("columns") and _ai_table.get("rows"):
+                try:
+                    _tdf = pd.DataFrame(_ai_table["rows"], columns=_ai_table["columns"])
+                    st.dataframe(_tdf, use_container_width=True, hide_index=True)
+                except Exception:
+                    # ── Table (Claude-formatted) ──────────────────────────────────
+            _ai_table = _ai_result.get("table", {})
+            if isinstance(_ai_table, dict) and _ai_table.get("show", True) and _ai_table.get("columns") and _ai_table.get("rows"):
+                try:
+                    _tdf = pd.DataFrame(_ai_table["rows"], columns=_ai_table["columns"])
+                    st.dataframe(_tdf, use_container_width=True, hide_index=True)
+                except Exception:
+                    st.dataframe(result["df"], use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(result["df"], use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(result["df"], use_container_width=True, hide_index=True)
 
             # ── Action Row: Download + Delete ─────────────────────────────
             col_exc, col_del = st.columns([3, 1])
