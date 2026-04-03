@@ -18,6 +18,10 @@ from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import anthropic
+from pypdf import PdfReader
+from docx import Document as DocxDocument
+from pptx import Presentation as PptxPresentation
+from openpyxl import load_workbook
 
 st.set_page_config(page_title="Customer Success Website Analytics Dashboard", layout="wide")
 
@@ -1679,18 +1683,74 @@ def _load_knowledge_from_drive():
             mime  = f.get("mimeType", "")
 
             try:
-                # For Google Docs, export as plain text
+                import io as _io
+                fname_lower = fname.lower()
+
+                # ── Google Workspace formats (export via API) ────────────
                 if "google-apps.document" in mime:
-                    resp = drive_service.files().export(
-                        fileId=fid, mimeType="text/plain"
-                    ).execute()
+                    resp = drive_service.files().export(fileId=fid, mimeType="text/plain").execute()
                     text = resp.decode("utf-8") if isinstance(resp, bytes) else str(resp)
-                # For plain text files (.txt)
-                elif "text/" in mime or fname.endswith(".txt"):
+                elif "google-apps.spreadsheet" in mime:
+                    resp = drive_service.files().export(fileId=fid, mimeType="text/csv").execute()
+                    text = resp.decode("utf-8") if isinstance(resp, bytes) else str(resp)
+                elif "google-apps.presentation" in mime:
+                    resp = drive_service.files().export(fileId=fid, mimeType="text/plain").execute()
+                    text = resp.decode("utf-8") if isinstance(resp, bytes) else str(resp)
+
+                # ── PDF ──────────────────────────────────────────────────
+                elif "pdf" in mime or fname_lower.endswith(".pdf"):
+                    resp = drive_service.files().get_media(fileId=fid).execute()
+                    pdf_bytes = resp if isinstance(resp, bytes) else resp.encode("utf-8")
+                    reader = PdfReader(_io.BytesIO(pdf_bytes))
+                    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+                # ── Word (.docx) ─────────────────────────────────────────
+                elif fname_lower.endswith(".docx"):
+                    resp = drive_service.files().get_media(fileId=fid).execute()
+                    doc_bytes = resp if isinstance(resp, bytes) else resp.encode("utf-8")
+                    doc = DocxDocument(_io.BytesIO(doc_bytes))
+                    text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+
+                # ── Excel (.xlsx) ────────────────────────────────────────
+                elif fname_lower.endswith((".xlsx", ".xls")):
+                    resp = drive_service.files().get_media(fileId=fid).execute()
+                    xls_bytes = resp if isinstance(resp, bytes) else resp.encode("utf-8")
+                    wb = load_workbook(_io.BytesIO(xls_bytes), read_only=True, data_only=True)
+                    rows = []
+                    for sheet in wb.sheetnames:
+                        ws = wb[sheet]
+                        rows.append(f"[Sheet: {sheet}]")
+                        for row in ws.iter_rows(values_only=True):
+                            row_text = ", ".join(str(c) if c is not None else "" for c in row)
+                            if row_text.strip(", "):
+                                rows.append(row_text)
+                    text = "\n".join(rows)
+                    wb.close()
+
+                # ── PowerPoint (.pptx) ───────────────────────────────────
+                elif fname_lower.endswith(".pptx"):
+                    resp = drive_service.files().get_media(fileId=fid).execute()
+                    pptx_bytes = resp if isinstance(resp, bytes) else resp.encode("utf-8")
+                    prs = PptxPresentation(_io.BytesIO(pptx_bytes))
+                    slides_text = []
+                    for i, slide in enumerate(prs.slides):
+                        slide_parts = [f"[Slide {i+1}]"]
+                        for shape in slide.shapes:
+                            if shape.has_text_frame:
+                                for para in shape.text_frame.paragraphs:
+                                    if para.text.strip():
+                                        slide_parts.append(para.text)
+                        slides_text.append("\n".join(slide_parts))
+                    text = "\n\n".join(slides_text)
+
+                # ── Plain text (.txt, .md, .csv, .json, .xml, .html) ────
+                elif "text/" in mime or fname_lower.endswith((".txt", ".md", ".csv", ".json", ".xml", ".html", ".htm", ".log", ".rtf")):
                     resp = drive_service.files().get_media(fileId=fid).execute()
                     text = resp.decode("utf-8") if isinstance(resp, bytes) else str(resp)
+
+                # ── Skip unsupported (images, videos, zip, etc.) ─────────
                 else:
-                    continue  # Skip unsupported file types
+                    continue
 
                 text = text.strip()
                 if text:
@@ -2603,18 +2663,26 @@ IMPORTANT RULES:
 - If the knowledge base contains seasonal patterns that explain the data, mention them.
 - If the knowledge base contains playbook actions for this situation, recommend them specifically.
 - Do not invent benchmarks or patterns not in the knowledge base.
-- Keep it professional but conversational. Focus on what a hotel marketer needs to do next."""
+- You have access to web search. Use it when you need current information such as: recent Google algorithm updates, current industry trends, competitor analysis, or any data point not covered by the knowledge base.
+- Keep it professional but conversational. Focus on what a hotel marketer needs to do next.
+- Always end with a specific, actionable next step."""
 
     if _use_claude and anthropic_key:
         try:
             ac = anthropic.Anthropic(api_key=anthropic_key)
             response = ac.messages.create(
                 model="claude-sonnet-4-20250514",
-                max_tokens=800,
+                max_tokens=1024,
                 temperature=0.3,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
                 messages=[{"role": "user", "content": prompt}],
             )
-            return response.content[0].text.strip()
+            # Extract text from all content blocks (may include web search results)
+            result_parts = []
+            for block in response.content:
+                if hasattr(block, "text") and block.text:
+                    result_parts.append(block.text)
+            return "\n".join(result_parts).strip() if result_parts else "No insight generated."
         except Exception:
             pass  # Fall through to Groq
 
