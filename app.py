@@ -2583,14 +2583,28 @@ Example for single period query:
   "gsc": {{"dimensions": ["query"], "row_limit": 25, "order_by": "clicks"}}
 }}
 
+IMPORTANT — Your JSON must also include these fields:
+
+"charts": a LIST of chart specs. Each item: {{"type": "bar"|"horizontal_bar"|"line"|"pie"|"none", "title": "Chart title", "x": "column_name", "y": "column_name"}}
+- Include 0, 1, or MULTIPLE charts depending on the query.
+- Use empty list [] or "none" if the query is better answered with just text and table (e.g. "list top keywords", "show data").
+- Use MULTIPLE charts when the query asks for different views (e.g. "analyse traffic" = channel bar chart + monthly trend line).
+- "bar" for comparing categories (channels, devices). "horizontal_bar" for long names (keywords, pages, cities). "line" for time trends. "pie" for proportions (sparingly).
+- NEVER use a line chart when there are multiple items per x-axis value. Use bar charts instead.
+
+"table": {{"show": true/false, "columns": ["col1","col2"], "column_labels": {{"col1": "Readable Name"}}, "sort_by": "column", "sort_desc": true, "limit": 20}}
+- "columns": list ONLY meaningful columns. "column_labels": rename technical names (e.g. "sessionDefaultChannelGroup" to "Channel", "engagementRate" to "Engagement Rate (%)", "ctr" to "CTR (%)").
+- "sort_by": the most important metric. "limit": 10-25 rows.
+
 Rules:
 - source: "ga4" or "gsc"
-- For trends/monthly: dimensions=["year","month"], chart_type="line"
-- For breakdowns: chart_type="bar"
-- For keywords: source="gsc"
+- For trends/monthly: dimensions=["year","month"]. Do NOT include "date" for monthly queries.
+- For "top keywords": use GSC with dimensions ["query"] NOT ["date","query"].
+- For breakdowns by channel/device: use GA4.
 - filter_channel maps to GA4 channel group e.g. "Organic Search", "Direct", "Paid Search"
 - For comparisons: always use is_comparison=true and include both periods in date_ranges
-- Always infer exact dates from the query. Q1 = Jan-Mar, Q2 = Apr-Jun, Q3 = Jul-Sep, Q4 = Oct-Dec
+- Always infer exact dates. Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec.
+- Match aggregation to the question: "which keywords" = group by keyword, "monthly trend" = group by month.
 - Return ONLY the JSON. No markdown fences.
 
 User request: {user_query}"""
@@ -2659,8 +2673,8 @@ Here is the live data:
 
 {data_str}
 {knowledge_block}
-Write a clear, concise analytical response in plain English. Structure it as:
-1. A 1-2 sentence direct answer to the question.
+Write a clear, concise analytical response. EVERY claim MUST reference a specific number from the live data above. Structure it as:
+1. A 1-2 sentence direct answer citing SPECIFIC numbers from the data.
 2. 3-5 bullet points with the most important observations from the data.
 3. 1-2 sentences with a specific, actionable recommendation.
 
@@ -2836,6 +2850,128 @@ def render_query_chart(df, instruction):
     )
     return fig
 
+
+def render_query_charts(df, instruction):
+    """
+    Returns a LIST of Plotly figures. Handles 0, 1, or multiple charts.
+    """
+    charts_spec = instruction.get("charts", [])
+    if not charts_spec or len(df) == 0:
+        old_type = instruction.get("chart_type", "")
+        if old_type and old_type not in ("table_only", "none"):
+            charts_spec = [{"type": old_type, "title": instruction.get("title", ""), "x": instruction.get("x_axis", ""), "y": instruction.get("y_axis", "")}]
+        else:
+            return []
+
+    COLORS = ["#4C8BF5", "#34A853", "#EA4335", "#FBBC04", "#9C27B0", "#00BCD4", "#FF5722"]
+    figures = []
+
+    for ci, spec in enumerate(charts_spec):
+        chart_type = spec.get("type", "bar")
+        if chart_type == "none":
+            continue
+
+        title = spec.get("title", instruction.get("title", ""))
+        x_col = spec.get("x", df.columns[0])
+        y_col = spec.get("y", df.columns[1] if len(df.columns) > 1 else df.columns[0])
+
+        if x_col not in df.columns:
+            x_col = df.columns[0]
+        if y_col not in df.columns:
+            num_cols = df.select_dtypes(include="number").columns
+            y_col = num_cols[0] if len(num_cols) > 0 else df.columns[-1]
+
+        fig = go.Figure()
+        has_periods = "Period" in df.columns and df["Period"].nunique() > 1
+
+        if chart_type == "line":
+            if has_periods:
+                for pi, period in enumerate(df["Period"].unique()):
+                    df_p = df[df["Period"] == period]
+                    fig.add_trace(go.Scatter(
+                        name=str(period), x=df_p[x_col].astype(str), y=df_p[y_col],
+                        mode="lines+markers", line=dict(color=COLORS[pi % len(COLORS)], width=2.5),
+                        marker=dict(size=6),
+                    ))
+            else:
+                fig.add_trace(go.Scatter(
+                    x=df[x_col].astype(str), y=df[y_col],
+                    mode="lines+markers+text",
+                    text=df[y_col].apply(lambda v: f"{v:,}" if isinstance(v, (int, float)) else str(v)),
+                    textposition="top center", textfont=dict(size=10),
+                    line=dict(color=COLORS[0], width=2.5), marker=dict(size=7),
+                    fill="tozeroy", fillcolor="rgba(76,139,245,0.08)",
+                ))
+        elif chart_type == "horizontal_bar":
+            if has_periods:
+                for pi, period in enumerate(df["Period"].unique()):
+                    df_p = df[df["Period"] == period]
+                    fig.add_trace(go.Bar(
+                        name=str(period), y=df_p[x_col].astype(str), x=df_p[y_col],
+                        orientation="h", marker_color=COLORS[pi % len(COLORS)],
+                        text=df_p[y_col].apply(lambda v: f"{v:,}" if isinstance(v, (int, float)) else str(v)),
+                        textposition="outside", textfont=dict(size=10), cliponaxis=False,
+                    ))
+            else:
+                fig.add_trace(go.Bar(
+                    y=df[x_col].astype(str), x=df[y_col], orientation="h",
+                    marker_color=COLORS[0],
+                    text=df[y_col].apply(lambda v: f"{v:,}" if isinstance(v, (int, float)) else str(v)),
+                    textposition="outside", textfont=dict(size=10), cliponaxis=False,
+                ))
+            max_x = df[y_col].max() if pd.api.types.is_numeric_dtype(df[y_col]) else 1
+            label_w = max(len(f"{max_x:,}") * 9 + 30, 80) if isinstance(max_x, (int, float)) else 80
+            fig.update_layout(
+                xaxis=dict(gridcolor="#eeeeee", tickformat=",", range=[0, max_x * 1.35] if isinstance(max_x, (int, float)) else None),
+                yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
+                margin=dict(t=60, b=60, l=160, r=label_w),
+            )
+        elif chart_type == "pie":
+            fig.add_trace(go.Pie(
+                labels=df[x_col], values=df[y_col], hole=0.4,
+                marker=dict(colors=COLORS[:len(df)]),
+                textinfo="label+percent+value", textfont=dict(size=12),
+                texttemplate="%{label}<br>%{value:,} (%{percent})",
+            ))
+            fig.update_layout(showlegend=False, margin=dict(t=60, b=30, l=30, r=30))
+        else:
+            if has_periods:
+                for pi, period in enumerate(df["Period"].unique()):
+                    df_p = df[df["Period"] == period]
+                    fig.add_trace(go.Bar(
+                        name=str(period), x=df_p[x_col].astype(str), y=df_p[y_col],
+                        marker_color=COLORS[pi % len(COLORS)],
+                        text=df_p[y_col].apply(lambda v: f"{v:,}" if isinstance(v, (int, float)) else str(v)),
+                        textposition="outside", textfont=dict(size=10), cliponaxis=False,
+                    ))
+            else:
+                fig.add_trace(go.Bar(
+                    x=df[x_col].astype(str), y=df[y_col], marker_color=COLORS[0],
+                    text=df[y_col].apply(lambda v: f"{v:,}" if isinstance(v, (int, float)) else str(v)),
+                    textposition="outside", textfont=dict(size=11), cliponaxis=False,
+                ))
+
+        if chart_type not in ("horizontal_bar", "pie"):
+            max_y = df[y_col].max() if pd.api.types.is_numeric_dtype(df[y_col]) else 1
+            fig.update_layout(
+                yaxis=dict(gridcolor="#eeeeee", tickformat=",", rangemode="tozero",
+                           range=[0, max_y * 1.25] if pd.api.types.is_numeric_dtype(df[y_col]) else None),
+                xaxis=dict(tickfont=dict(size=11), tickangle=-30 if len(df) > 8 else 0),
+            )
+
+        fig.update_layout(
+            title=dict(text=title, font=dict(size=15, family="Arial")),
+            plot_bgcolor="white", paper_bgcolor="white",
+            font=dict(family="Arial", size=13),
+            barmode="group" if has_periods else "relative",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5, font=dict(size=12)) if has_periods else {},
+            margin=dict(t=70, b=80, l=60, r=40) if chart_type not in ("horizontal_bar", "pie") else {},
+            height=420,
+        )
+        figures.append(fig)
+
+    return figures
+
 # ── Excel builder ─────────────────────────────────────────────────────────
 def build_excel(query_results):
     """
@@ -2965,13 +3101,32 @@ if st.session_state["query_results"]:
                 st.markdown("#### 💡 AI Insight")
                 st.info(result["insight"])
 
-            # ── Chart ─────────────────────────────────────────────────────
-            fig = render_query_chart(result["df"], result["instruction"])
-            if fig:
-                st.plotly_chart(fig, use_container_width=True, key=f"qchart_{i}")
+            # ── Charts (0, 1, or multiple) ────────────────────────────────
+            _chart_figs = render_query_charts(result["df"], result["instruction"])
+            for _fi, _fig in enumerate(_chart_figs):
+                st.plotly_chart(_fig, use_container_width=True, key=f"qchart_{i}_{_fi}")
 
-            # ── Data Table ────────────────────────────────────────────────
-            st.dataframe(result["df"], use_container_width=True, hide_index=True)
+            # ── Smart Data Table ──────────────────────────────────────────
+            _df_show = result["df"].copy()
+            _tspec = result["instruction"].get("table", {})
+            if isinstance(_tspec, dict):
+                _tcols = _tspec.get("columns")
+                if _tcols:
+                    _valid = [c for c in _tcols if c in _df_show.columns]
+                    if _valid:
+                        _df_show = _df_show[_valid]
+                _tlabels = _tspec.get("column_labels")
+                if _tlabels:
+                    _rmap = {k: v for k, v in _tlabels.items() if k in _df_show.columns}
+                    if _rmap:
+                        _df_show = _df_show.rename(columns=_rmap)
+                _tsort = _tspec.get("sort_by", "")
+                if _tsort and _tsort in _df_show.columns:
+                    _df_show = _df_show.sort_values(_tsort, ascending=not _tspec.get("sort_desc", True))
+                _tlimit = _tspec.get("limit", 25)
+                _df_show = _df_show.head(_tlimit)
+            if _tspec.get("show", True) if isinstance(_tspec, dict) else True:
+                st.dataframe(_df_show, use_container_width=True, hide_index=True)
 
             # ── Action Row: Download + Delete ─────────────────────────────
             col_exc, col_del = st.columns([3, 1])
