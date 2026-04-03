@@ -2520,7 +2520,7 @@ if _page == "Report":
                         marker_color=YEAR_COLORS[_yi % len(YEAR_COLORS)], cliponaxis=False,
                     ))
                 _max_all = _rpt_yoy["sessions"].max()
-                _fig_rpt_all.update_layout(**yoy_layout("Sessions"), height=380)
+                _fig_rpt_all.update_layout(**{**yoy_layout("Sessions"), "height": 380})
                 _fig_rpt_all.update_layout(yaxis=dict(range=[0, _max_all * 1.25]))
                 st.plotly_chart(_fig_rpt_all, use_container_width=True, key="rpt_fig_all")
             st.markdown("")
@@ -2542,7 +2542,7 @@ if _page == "Report":
                         marker_color=YEAR_COLORS[_yi % len(YEAR_COLORS)], cliponaxis=False,
                     ))
                 _max_org = _rpt_org["sessions"].max()
-                _fig_rpt_org.update_layout(**yoy_layout("Organic Sessions"), height=380)
+                _fig_rpt_org.update_layout(**{**yoy_layout("Organic Sessions"), "height": 380})
                 _fig_rpt_org.update_layout(yaxis=dict(range=[0, _max_org * 1.25]))
                 st.plotly_chart(_fig_rpt_org, use_container_width=True, key="rpt_fig_org")
             st.markdown("")
@@ -2665,7 +2665,7 @@ if _page == "Report":
                             textposition="outside", textfont=dict(size=9),
                             marker_color=YEAR_COLORS[_yi % len(YEAR_COLORS)], cliponaxis=False,
                         ))
-                    _fig_rpt_clicks.update_layout(**yoy_layout("Clicks"), height=380)
+                    _fig_rpt_clicks.update_layout(**{**yoy_layout("Clicks"), "height": 380})
                     st.plotly_chart(_fig_rpt_clicks, use_container_width=True, key="rpt_fig_clicks")
             st.markdown("")
 
@@ -2688,7 +2688,7 @@ if _page == "Report":
                             textposition="outside", textfont=dict(size=9),
                             marker_color=YEAR_COLORS[_yi % len(YEAR_COLORS)], cliponaxis=False,
                         ))
-                    _fig_rpt_impr.update_layout(**yoy_layout("Impressions"), height=380)
+                    _fig_rpt_impr.update_layout(**{**yoy_layout("Impressions"), "height": 380})
                     st.plotly_chart(_fig_rpt_impr, use_container_width=True, key="rpt_fig_impr")
             st.markdown("")
 
