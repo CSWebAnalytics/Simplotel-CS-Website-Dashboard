@@ -2494,11 +2494,14 @@ def _generate_word_report(property_name, date_label, sections):
                 cells = table.add_row().cells
                 for j, col in enumerate(df.columns):
                     val = row[col]
-                    if isinstance(val, float):
-                        cells[j].text = f"{val:,.1f}" if val != int(val) else f"{int(val):,}"
-                    elif isinstance(val, int):
-                        cells[j].text = f"{val:,}"
-                    else:
+                    try:
+                        if pd.isna(val):
+                            cells[j].text = ""
+                        elif isinstance(val, (int, float)):
+                            cells[j].text = f"{val:,.0f}" if float(val) == int(float(val)) else f"{val:,.1f}"
+                        else:
+                            cells[j].text = str(val)
+                    except (ValueError, TypeError):
                         cells[j].text = str(val)
         if "summary" in section:
             doc.add_paragraph(section["summary"])
@@ -2561,11 +2564,14 @@ def _generate_pptx_report(property_name, date_label, sections):
                 for j in range(cols_count):
                     cell = tbl.cell(i + 1, j)
                     val = df.iloc[i, j]
-                    if isinstance(val, float):
-                        cell.text = f"{val:,.1f}" if val != int(val) else f"{int(val):,}"
-                    elif isinstance(val, int):
-                        cell.text = f"{val:,}"
-                    else:
+                    try:
+                        if pd.isna(val):
+                            cell.text = ""
+                        elif isinstance(val, (int, float)):
+                            cell.text = f"{val:,.0f}" if float(val) == int(float(val)) else f"{val:,.1f}"
+                        else:
+                            cell.text = str(val)
+                    except (ValueError, TypeError):
                         cell.text = str(val)
                     for paragraph in cell.text_frame.paragraphs:
                         paragraph.font.size = Pt(9)
@@ -2601,11 +2607,14 @@ def _generate_pdf_report(property_name, date_label, sections):
                 html += "<tr>"
                 for col in df.columns:
                     val = row[col]
-                    if isinstance(val, float):
-                        html += f"<td>{val:,.1f}</td>" if val != int(val) else f"<td>{int(val):,}</td>"
-                    elif isinstance(val, int):
-                        html += f"<td>{val:,}</td>"
-                    else:
+                    try:
+                        if pd.isna(val):
+                            html += "<td></td>"
+                        elif isinstance(val, (int, float)):
+                            html += f"<td>{val:,.0f}</td>" if float(val) == int(float(val)) else f"<td>{val:,.1f}</td>"
+                        else:
+                            html += f"<td>{val}</td>"
+                    except (ValueError, TypeError):
                         html += f"<td>{val}</td>"
                 html += "</tr>"
             html += "</table>"
