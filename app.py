@@ -2681,8 +2681,8 @@ IMPORTANT RULES:
                     result_parts.append(block.text)
             if result_parts:
                 return "\n".join(result_parts).strip()
-        except Exception as _e:
-            pass  # Fall through to Groq
+        except Exception as _claude_err:
+            _claude_error_msg = str(_claude_err)[:300]  # Save for display
 
     if api_key:
         try:
@@ -2693,10 +2693,11 @@ IMPORTANT RULES:
                 temperature=0.3, max_tokens=600,
             )
             return response.choices[0].message.content.strip()
-        except Exception:
-            pass
+        except Exception as _ge:
+            return f"Groq error: {str(_ge)[:200]}"
 
-    return "No AI provider available. Add anthropic_api_key or groq_api_key to Streamlit Secrets."
+    _cerr = _claude_error_msg if '_claude_error_msg' in dir() else "not attempted"
+    return f"Claude error: {_cerr} | anthropic_key={'SET' if anthropic_key else 'MISSING'}, groq_key={'SET' if api_key else 'MISSING'}"
 
 # ── Execute GA4 query from instruction ────────────────────────────────────
 def execute_ga4_query(instruction, start_str, end_str):
