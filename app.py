@@ -2663,7 +2663,6 @@ IMPORTANT RULES:
 - If the knowledge base contains seasonal patterns that explain the data, mention them.
 - If the knowledge base contains playbook actions for this situation, recommend them specifically.
 - Do not invent benchmarks or patterns not in the knowledge base.
-- You have access to web search. Use it when you need current information such as: recent Google algorithm updates, current industry trends, competitor analysis, or any data point not covered by the knowledge base.
 - Keep it professional but conversational. Focus on what a hotel marketer needs to do next.
 - Always end with a specific, actionable next step."""
 
@@ -2674,16 +2673,15 @@ IMPORTANT RULES:
                 model="claude-sonnet-4-20250514",
                 max_tokens=1024,
                 temperature=0.3,
-                tools=[{"type": "web_search_20250305", "name": "web_search"}],
                 messages=[{"role": "user", "content": prompt}],
             )
-            # Extract text from all content blocks (may include web search results)
             result_parts = []
             for block in response.content:
                 if hasattr(block, "text") and block.text:
                     result_parts.append(block.text)
-            return "\n".join(result_parts).strip() if result_parts else "No insight generated."
-        except Exception:
+            if result_parts:
+                return "\n".join(result_parts).strip()
+        except Exception as _e:
             pass  # Fall through to Groq
 
     if api_key:
