@@ -1817,6 +1817,9 @@ def search_knowledge(query, max_results=5):
     text = "\n\n---\n\n".join(
         f"[Source: {doc['name']}]\n{doc['content']}" for _, doc in top_docs
     )
+    # Truncate to ~4000 characters to stay within token limits
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n[... knowledge context truncated for length]"
     return text, len(docs)
 
 # ── DATA FUNCTIONS ────────────────────────────────────────────────────────────
@@ -2632,7 +2635,10 @@ def generate_text_insight(user_query, df, api_key, property_name):
     Generate a domain-aware analytical response using Claude API + RAG
     knowledge from Google Drive. Falls back to Groq if Claude unavailable.
     """
-    data_str = df.to_string(index=False, max_rows=50)
+    data_str = df.to_string(index=False, max_rows=30)
+    # Truncate data to prevent token overflow
+    if len(data_str) > 3000:
+        data_str = data_str[:3000] + "\n[... data truncated]"
 
     # RAG: search knowledge base for relevant context
     knowledge_context, _ = search_knowledge(f"{property_name} {user_query}")
@@ -2694,7 +2700,8 @@ IMPORTANT RULES:
             )
             return response.choices[0].message.content.strip()
         except Exception as _ge:
-            return f"Groq error: {str(_ge)[:200]}"
+            _cerr = _claude_error_msg if "_claude_error_msg" in dir() else "not attempted"
+            return f"Claude error: {_cerr}\n\nGroq error: {str(_ge)[:200]}"
 
     _cerr = _claude_error_msg if '_claude_error_msg' in dir() else "not attempted"
     return f"Claude error: {_cerr} | anthropic_key={'SET' if anthropic_key else 'MISSING'}, groq_key={'SET' if api_key else 'MISSING'}"
