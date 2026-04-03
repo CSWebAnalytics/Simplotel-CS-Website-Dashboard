@@ -3255,17 +3255,18 @@ if run_query:
                                 user_query, df_result, groq_key or "",
                                 PROPERTIES[selected_label]["name"]
                             )
-                        text_insight = _ai_res.get("insight", "")
-                        # Store ai_result for chart/table rendering
-                        _current_ai_result = _ai_res
+                            text_insight = _ai_res.get("insight", "")
+                            _current_ai_result = _ai_res
                         except Exception:
                             text_insight = ""
+                            _current_ai_result = {}
                     st.session_state["query_results"].append({
                         "title":       title,
                         "query":       user_query,
                         "df":          df_result,
                         "instruction": instruction,
                         "insight":     text_insight,
+                        "ai_result":   _current_ai_result if "_current_ai_result" in dir() else {},
                     })
             except json.JSONDecodeError:
                 st.error("The AI returned an unexpected response. Try rephrasing your query.")
@@ -3315,16 +3316,7 @@ if st.session_state["query_results"]:
                     _tdf = pd.DataFrame(_ai_table["rows"], columns=_ai_table["columns"])
                     st.dataframe(_tdf, use_container_width=True, hide_index=True)
                 except Exception:
-                    # ── Table (Claude-formatted) ──────────────────────────────────
-            _ai_table = _ai_result.get("table", {})
-            if isinstance(_ai_table, dict) and _ai_table.get("show", True) and _ai_table.get("columns") and _ai_table.get("rows"):
-                try:
-                    _tdf = pd.DataFrame(_ai_table["rows"], columns=_ai_table["columns"])
-                    st.dataframe(_tdf, use_container_width=True, hide_index=True)
-                except Exception:
                     st.dataframe(result["df"], use_container_width=True, hide_index=True)
-            else:
-                st.dataframe(result["df"], use_container_width=True, hide_index=True)
             else:
                 st.dataframe(result["df"], use_container_width=True, hide_index=True)
 
