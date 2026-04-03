@@ -2320,6 +2320,11 @@ if gsc_available:
 else:
     st.sidebar.caption("GSC: not matched — check domain")
 
+
+
+# ── PAGE TOGGLE ──────────────────────────────────────────────────────────────
+st.sidebar.markdown("")
+_page = st.sidebar.radio("", ["Dashboard", "Report"], horizontal=True, key="page_toggle", label_visibility="collapsed")
 st.sidebar.markdown("---")
 
 # ── DATE PICKER — DROPDOWN STYLE ──────────────────────────────────────────────
