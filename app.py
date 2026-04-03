@@ -1524,6 +1524,7 @@ def get_credentials():
     sa_scopes = [
         "https://www.googleapis.com/auth/analytics.readonly",
         "https://www.googleapis.com/auth/webmasters.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
     ]
 
     # ── Streamlit Cloud: load from secrets ───────────────────────────────────
@@ -1569,6 +1570,7 @@ def _get_all_credentials():
     sa_scopes = [
         "https://www.googleapis.com/auth/analytics.readonly",
         "https://www.googleapis.com/auth/webmasters.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
     ]
     all_creds = [get_credentials()]  # Primary always first
 
