@@ -17,6 +17,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+import anthropic
 
 st.set_page_config(page_title="Customer Success Website Analytics Dashboard", layout="wide")
 
@@ -1634,6 +1635,128 @@ def _get_all_gsc_sites():
             continue
     return list(all_sites)
 
+
+# ── RAG KNOWLEDGE BASE — GOOGLE DRIVE ────────────────────────────────────────
+# Knowledge documents are stored in a shared Google Drive folder.
+# Anyone on the team can add .txt or .doc files to the folder.
+# The dashboard reads them automatically.
+KNOWLEDGE_FOLDER_ID = "10Q68Vi8bNKN42pO3jbNh-ZKPqrcgs6zr"
+# Override from Streamlit Secrets if set
+try:
+    if hasattr(st, "secrets") and "knowledge_folder_id" in st.secrets:
+        KNOWLEDGE_FOLDER_ID = st.secrets["knowledge_folder_id"]
+except Exception:
+    pass
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _load_knowledge_from_drive():
+    """
+    Load all text files from the shared Google Drive folder.
+    Cached for 30 minutes — new files are picked up on next cache refresh.
+    Returns a list of {"name": filename, "content": text}.
+    """
+    try:
+        creds = get_credentials()
+        drive_service = build("drive", "v3", credentials=creds)
+
+        # List all files in the knowledge folder
+        results = drive_service.files().list(
+            q=f"'{KNOWLEDGE_FOLDER_ID}' in parents and trashed = false",
+            fields="files(id, name, mimeType)",
+            pageSize=500,
+        ).execute()
+
+        files = results.get("files", [])
+        if not files:
+            return []
+
+        knowledge_docs = []
+        for f in files:
+            fname = f["name"]
+            fid   = f["id"]
+            mime  = f.get("mimeType", "")
+
+            try:
+                # For Google Docs, export as plain text
+                if "google-apps.document" in mime:
+                    resp = drive_service.files().export(
+                        fileId=fid, mimeType="text/plain"
+                    ).execute()
+                    text = resp.decode("utf-8") if isinstance(resp, bytes) else str(resp)
+                # For plain text files (.txt)
+                elif "text/" in mime or fname.endswith(".txt"):
+                    resp = drive_service.files().get_media(fileId=fid).execute()
+                    text = resp.decode("utf-8") if isinstance(resp, bytes) else str(resp)
+                else:
+                    continue  # Skip unsupported file types
+
+                text = text.strip()
+                if text:
+                    knowledge_docs.append({"name": fname, "content": text})
+            except Exception:
+                continue
+
+        return knowledge_docs
+    except Exception:
+        return []
+
+def _score_relevance(query, document_text):
+    """
+    Simple keyword relevance score. No ML models needed.
+    Counts how many query words appear in the document.
+    Gives bonus points for exact phrase matches.
+    """
+    query_lower = query.lower()
+    doc_lower   = document_text.lower()
+
+    # Word overlap score
+    query_words = set(query_lower.split())
+    stop_words  = {"the","a","an","is","are","was","were","for","to","in","of","and","or","this","that","what","how","why","when","where","which","do","does","did","my","our","its","i","we","you","it","on","at","by","with","from"}
+    query_words -= stop_words
+    if not query_words:
+        return 0
+
+    matches = sum(1 for w in query_words if w in doc_lower)
+    score   = matches / len(query_words) * 100
+
+    # Bonus for multi-word phrase matches (2+ consecutive words from query found in doc)
+    words_list = [w for w in query_lower.split() if w not in stop_words]
+    for i in range(len(words_list) - 1):
+        phrase = f"{words_list[i]} {words_list[i+1]}"
+        if phrase in doc_lower:
+            score += 15
+
+    return score
+
+def search_knowledge(query, max_results=5):
+    """
+    Search the Google Drive knowledge base for documents relevant to the query.
+    Returns the concatenated text of the most relevant documents.
+    """
+    docs = _load_knowledge_from_drive()
+    if not docs:
+        return "", 0
+
+    # Score each document
+    scored = []
+    for doc in docs:
+        score = _score_relevance(query, doc["content"])
+        if score > 10:  # Minimum relevance threshold
+            scored.append((score, doc))
+
+    # Sort by score descending, take top results
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_docs = scored[:max_results]
+
+    if not top_docs:
+        # If no relevant docs found, return all docs (let Claude decide)
+        top_docs = [(0, doc) for doc in docs[:max_results]]
+
+    text = "\n\n---\n\n".join(
+        f"[Source: {doc['name']}]\n{doc['content']}" for _, doc in top_docs
+    )
+    return text, len(docs)
+
 # ── DATA FUNCTIONS ────────────────────────────────────────────────────────────
 # Permission error flag — set True when service account lacks access to property
 _GA4_PERMISSION_ERROR = False
@@ -2286,31 +2409,53 @@ st.caption(
     "and return a table, chart, and Excel download."
 )
 
-# ── Groq API key — auto-loaded from Streamlit Secrets, fallback to manual ────
+# ── AI API keys — Claude (primary) + Groq (fallback) ─────────────────────────
+def _get_anthropic_key():
+    try:
+        if hasattr(st, "secrets") and "anthropic_api_key" in st.secrets:
+            return st.secrets["anthropic_api_key"]
+    except Exception:
+        pass
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return os.environ["ANTHROPIC_API_KEY"]
+    return None
+
 def _get_groq_key():
-    # 1. Streamlit Secrets (cloud deployment — preferred)
     try:
         if hasattr(st, "secrets") and "groq_api_key" in st.secrets:
             return st.secrets["groq_api_key"]
     except Exception:
         pass
-    # 2. Environment variable (optional local setup)
-    import os
     if os.environ.get("GROQ_API_KEY"):
         return os.environ["GROQ_API_KEY"]
-    # 3. Manual entry fallback (shown only if key not found above)
     return None
 
-_auto_key = _get_groq_key()
-if _auto_key:
-    claude_key = _auto_key
+anthropic_key = _get_anthropic_key()
+groq_key = _get_groq_key()
+
+# Show knowledge base status
+_kb_text, _kb_count = search_knowledge("test", max_results=1)
+if _kb_count > 0:
+    st.caption(f"\U0001f4da Knowledge base: {_kb_count} document(s) loaded from Google Drive")
 else:
-    claude_key = st.text_input(
-        "Groq API Key",
+    st.caption("\U0001f4da Knowledge base: no documents found — add .txt files to the shared Google Drive folder")
+
+_use_claude = bool(anthropic_key)
+if _use_claude:
+    st.caption("\U0001f916 AI provider: Claude (Anthropic)")
+elif groq_key:
+    st.caption("\U0001f916 AI provider: Groq (LLaMA 3.3)")
+
+if not anthropic_key and not groq_key:
+    anthropic_key = st.text_input(
+        "Anthropic API Key",
         type="password",
-        placeholder="gsk_...",
-        help="Key not found in Streamlit Secrets. Enter manually or ask your admin to add groq_api_key to Streamlit Secrets.",
+        placeholder="sk-ant-...",
+        help="No API key found. Enter your Anthropic API key or ask your admin to add anthropic_api_key to Streamlit Secrets.",
     )
+    _use_claude = bool(anthropic_key)
+
+claude_key = groq_key or ""  # backward compat for any remaining references
 
 # ── GA4 dimension/metric schema for Claude ────────────────────────────────
 GA4_SCHEMA = """
@@ -2327,28 +2472,9 @@ Available GSC metrics: clicks, impressions, ctr, position.
 # ── Query interpreter via Claude API ─────────────────────────────────────
 def interpret_query(user_query, api_key, property_name, start_str, end_str):
     """
-    Send the user query to Claude. Claude returns a JSON instruction:
-    {
-      "source": "ga4" | "gsc",
-      "title": "Human-readable title for the result",
-      "chart_type": "bar" | "line" | "table_only",
-      "x_axis": "column name for x axis",
-      "y_axis": "column name for y axis",
-      "ga4": {
-        "dimensions": [...],
-        "metrics": [...],
-        "order_by_metric": "metric_name",
-        "limit": 25,
-        "filter_channel": null | "Organic Search" | etc
-      },
-      "gsc": {
-        "dimensions": ["query"|"page"|"country"|"device"],
-        "row_limit": 25,
-        "order_by": "clicks"|"impressions"|"position"
-      }
-    }
+    Send the user query to Claude API (primary) or Groq (fallback).
+    Returns a JSON instruction for data fetching.
     """
-    client = Groq(api_key=api_key)
     today_str = str(date.today())
     prompt = f"""You are a data fetching assistant for a hotel website analytics dashboard.
 The active property is: {property_name}
@@ -2404,45 +2530,105 @@ Rules:
 
 User request: {user_query}"""
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-        max_tokens=512,
-    )
-    raw = response.choices[0].message.content.strip()
+    if _use_claude and anthropic_key:
+        try:
+            ac = anthropic.Anthropic(api_key=anthropic_key)
+            response = ac.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=512,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text.strip()
+        except Exception:
+            # Fall through to Groq
+            if api_key:
+                groq_client = Groq(api_key=api_key)
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0, max_tokens=512,
+                )
+                raw = response.choices[0].message.content.strip()
+            else:
+                raise
+    elif api_key:
+        groq_client = Groq(api_key=api_key)
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0, max_tokens=512,
+        )
+        raw = response.choices[0].message.content.strip()
+    else:
+        raise ValueError("No AI provider available. Add anthropic_api_key or groq_api_key to Streamlit Secrets.")
     raw = raw.replace("```json", "").replace("```", "").strip()
     return json.loads(raw)
 
 def generate_text_insight(user_query, df, api_key, property_name):
     """
-    Given the query and the resulting dataframe, ask Groq to write
-    a plain-English analytical response with key insights and observations.
+    Generate a domain-aware analytical response using Claude API + RAG
+    knowledge from Google Drive. Falls back to Groq if Claude unavailable.
     """
-    client = Groq(api_key=api_key)
-    # Convert df to a compact string for the prompt
     data_str = df.to_string(index=False, max_rows=50)
-    prompt = f"""You are a hotel website analytics expert working for a Customer Success team at Simplotel.
+
+    # RAG: search knowledge base for relevant context
+    knowledge_context, _ = search_knowledge(f"{property_name} {user_query}")
+    knowledge_block = ""
+    if knowledge_context:
+        knowledge_block = f"""
+
+INSTITUTIONAL KNOWLEDGE (use this to inform your analysis — reference specific benchmarks, patterns, and playbook actions where relevant):
+
+{knowledge_context}
+"""
+
+    prompt = f"""You are a senior hotel website analytics expert working for the Customer Success team at Simplotel.
 The property is: {property_name}
 The team asked: "{user_query}"
-Here is the data that was retrieved:
+
+Here is the live data:
 
 {data_str}
-
+{knowledge_block}
 Write a clear, concise analytical response in plain English. Structure it as:
 1. A 1-2 sentence direct answer to the question.
 2. 3-5 bullet points with the most important observations from the data.
-3. 1-2 sentences on what this means for the hotel and any recommended action.
+3. 1-2 sentences with a specific, actionable recommendation.
 
-Keep it professional but conversational. Do not use technical jargon. Focus on what matters to a hotel marketer."""
+IMPORTANT RULES:
+- If the knowledge base contains relevant benchmarks, reference them explicitly (e.g. "This 58% engagement rate is above the 45% concern threshold but below the 60% strong benchmark for boutique hotels").
+- If the knowledge base contains seasonal patterns that explain the data, mention them.
+- If the knowledge base contains playbook actions for this situation, recommend them specifically.
+- Do not invent benchmarks or patterns not in the knowledge base.
+- Keep it professional but conversational. Focus on what a hotel marketer needs to do next."""
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=600,
-    )
-    return response.choices[0].message.content.strip()
+    if _use_claude and anthropic_key:
+        try:
+            ac = anthropic.Anthropic(api_key=anthropic_key)
+            response = ac.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=800,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.content[0].text.strip()
+        except Exception:
+            pass  # Fall through to Groq
+
+    if api_key:
+        try:
+            groq_client = Groq(api_key=api_key)
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3, max_tokens=600,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception:
+            pass
+
+    return "No AI provider available. Add anthropic_api_key or groq_api_key to Streamlit Secrets."
 
 # ── Execute GA4 query from instruction ────────────────────────────────────
 def execute_ga4_query(instruction, start_str, end_str):
@@ -2609,8 +2795,8 @@ with st.form("query_form", clear_on_submit=True):
 if run_query:
     if not user_query.strip():
         st.warning("Please enter a query.")
-    elif not claude_key.strip():
-        st.warning("Please enter your Groq API key above.")
+    elif not anthropic_key and not groq_key:
+        st.warning("No AI provider configured. Add anthropic_api_key or groq_api_key to Streamlit Secrets.")
     else:
         # Date range inferred by AI from query text; fallback = last 90 days
         q_start = str(date.today() - timedelta(days=90))
@@ -2618,7 +2804,7 @@ if run_query:
         with st.spinner("Thinking..."):
             try:
                 instruction = interpret_query(
-                    user_query, claude_key,
+                    user_query, groq_key or "",
                     PROPERTIES[selected_label]["name"],
                     q_start, q_end
                 )
@@ -2658,7 +2844,7 @@ if run_query:
                     with st.spinner("Generating insight..."):
                         try:
                             text_insight = generate_text_insight(
-                                user_query, df_result, claude_key,
+                                user_query, df_result, groq_key or "",
                                 PROPERTIES[selected_label]["name"]
                             )
                         except Exception:
