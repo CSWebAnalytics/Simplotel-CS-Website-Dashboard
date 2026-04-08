@@ -13,5 +13,5 @@ anthropic
 pypdf
 python-docx
 python-pptx
-kaleido
+kaleido==0.2.1
 reportlab>=4.0.0
