@@ -2630,66 +2630,72 @@ def _generate_pptx_report(property_name, date_label, sections):
     return buf.getvalue()
 
 def _generate_pdf_report(property_name, date_label, sections):
-    """Generate a real PDF with chart images above tables."""
-    import base64
+    """Generate a real PDF using reportlab with chart images above tables."""
     import io as _io2
-    html_parts = [
-        "<html><head><style>",
-        "body { font-family: Arial; margin: 40px; color: #333; }",
-        "h1 { color: #1F4E79; text-align: center; }",
-        "h2 { color: #1F4E79; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 28px; }",
-        ".subtitle { text-align: center; color: #888; margin-bottom: 30px; }",
-        ".chart-img { width: 100%; max-width: 700px; display: block; margin: 10px auto 16px auto; }",
-        "table { border-collapse: collapse; width: 100%; margin: 8px 0 20px 0; font-size: 10px; }",
-        "th { background: #1F4E79; color: white; padding: 5px 7px; text-align: left; }",
-        "td { padding: 4px 7px; border-bottom: 1px solid #eee; }",
-        "tr:nth-child(even) { background: #f9f9f9; }",
-        "</style></head><body>",
-        "<h1>" + property_name + "</h1>",
-        '<p class="subtitle">Website Performance Report | ' + date_label + '</p>',
-    ]
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+    from reportlab.lib.enums import TA_CENTER
+
+    buf = _io2.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=0.6*inch, rightMargin=0.6*inch, topMargin=0.6*inch, bottomMargin=0.6*inch)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Title1", parent=styles["Heading1"], fontName="Helvetica-Bold", fontSize=22, textColor=colors.HexColor("#1F4E79"), alignment=TA_CENTER, spaceAfter=6)
+    sub_style = ParagraphStyle("Sub", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#888888"), alignment=TA_CENTER, spaceAfter=18)
+    h2_style = ParagraphStyle("H2", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=14, textColor=colors.HexColor("#1F4E79"), spaceBefore=14, spaceAfter=8)
+
+    story = []
+    story.append(Paragraph(property_name, title_style))
+    story.append(Paragraph("Website Performance Report  |  " + date_label, sub_style))
+
     for section in sections:
-        html_parts.append("<h2>" + section["title"] + "</h2>")
+        story.append(Paragraph(section["title"], h2_style))
         if "fig" in section and section["fig"] is not None:
             png = _fig_to_png(section["fig"])
             if png:
-                b64 = base64.b64encode(png).decode("utf-8")
-                html_parts.append('<img class="chart-img" src="data:image/png;base64,' + b64 + '" />')
+                try:
+                    img = Image(_io2.BytesIO(png), width=7*inch, height=3.2*inch)
+                    story.append(img)
+                    story.append(Spacer(1, 6))
+                except Exception:
+                    pass
         if "df" in section and section["df"] is not None and not section["df"].empty:
             df = section["df"]
-            html_parts.append("<table><tr>")
-            for col in df.columns:
-                html_parts.append("<th>" + str(col) + "</th>")
-            html_parts.append("</tr>")
+            data = [[str(c) for c in df.columns]]
             for _, row in df.iterrows():
-                html_parts.append("<tr>")
+                row_vals = []
                 for col in df.columns:
                     val = row[col]
                     try:
                         if pd.isna(val):
-                            html_parts.append("<td></td>")
+                            row_vals.append("")
                         elif isinstance(val, (int, float)):
-                            html_parts.append("<td>" + (f"{val:,.0f}" if float(val) == int(float(val)) else f"{val:,.1f}") + "</td>")
+                            row_vals.append(f"{val:,.0f}" if float(val) == int(float(val)) else f"{val:,.1f}")
                         else:
-                            html_parts.append("<td>" + str(val) + "</td>")
+                            row_vals.append(str(val))
                     except (ValueError, TypeError):
-                        html_parts.append("<td>" + str(val) + "</td>")
-                html_parts.append("</tr>")
-            html_parts.append("</table>")
-        if "summary" in section:
-            html_parts.append("<p>" + section["summary"] + "</p>")
-    html_parts.append("</body></html>")
-    html_str = "\n".join(html_parts)
-    try:
-        from xhtml2pdf import pisa
-        pdf_buf = _io2.BytesIO()
-        status = pisa.CreatePDF(_io2.StringIO(html_str), dest=pdf_buf)
-        if not status.err:
-            pdf_buf.seek(0)
-            return pdf_buf.getvalue()
-    except Exception:
-        pass
-    return html_str.encode("utf-8")
+                        row_vals.append(str(val))
+                data.append(row_vals)
+            tbl = Table(data, repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1F4E79")),
+                ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+                ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+                ("FONTSIZE", (0,0), (-1,-1), 8),
+                ("BOTTOMPADDING", (0,0), (-1,0), 6),
+                ("TOPPADDING", (0,0), (-1,0), 6),
+                ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F5F5F5")]),
+                ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#DDDDDD")),
+                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ]))
+            story.append(tbl)
+            story.append(Spacer(1, 12))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
 
 # ════════════════════════════════════════════════════════════════════
 # REPORT PAGE
