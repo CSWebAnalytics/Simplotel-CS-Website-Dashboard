@@ -2460,6 +2460,13 @@ load = st.sidebar.button("Load / Refresh Data", type="primary", use_container_wi
 
 
 # ── REPORT FILE GENERATORS ────────────────────────────────────────────────────
+def _fig_to_png(fig):
+    """Render a Plotly figure to PNG bytes using kaleido. Returns None on failure."""
+    try:
+        return fig.to_image(format="png", width=1000, height=460, scale=2)
+    except Exception:
+        return None
+
 def _generate_word_report(property_name, date_label, sections):
     """Generate a Word document from report sections."""
     from docx import Document as DocxDoc
@@ -2484,6 +2491,12 @@ def _generate_word_report(property_name, date_label, sections):
     doc.add_paragraph("")
     for section in sections:
         doc.add_heading(section["title"], level=2)
+        if "fig" in section and section["fig"] is not None:
+            png = _fig_to_png(section["fig"])
+            if png:
+                import io as _io2
+                doc.add_picture(_io2.BytesIO(png), width=Inches(6.0))
+                doc.add_paragraph("")
         if "df" in section and section["df"] is not None and not section["df"].empty:
             df = section["df"]
             table = doc.add_table(rows=1, cols=len(df.columns))
@@ -2545,7 +2558,43 @@ def _generate_pptx_report(property_name, date_label, sections):
         p.font.size = Pt(24)
         p.font.bold = True
         p.font.color.rgb = RGBColor(0x1F, 0x4E, 0x79)
-        if "df" in section and section["df"] is not None and not section["df"].empty:
+      has_chart = "fig" in section and section["fig"] is not None
+        has_table = "df" in section and section["df"] is not None and not section["df"].empty
+        if has_chart:
+            png = _fig_to_png(section["fig"])
+            if png:
+                import io as _io2
+                img = _io2.BytesIO(png)
+                if has_table:
+                    slide.shapes.add_picture(img, Emu(457200), Emu(685800), Emu(11277600), Emu(3200400))
+                    df = section["df"]
+                    rows_count = min(len(df) + 1, 10)
+                    cols_count = min(len(df.columns), 6)
+                    tbl = slide.shapes.add_table(rows_count, cols_count, Emu(457200), Emu(4000320), Emu(11277600), Emu(min(rows_count * 274638, 2400300))).table
+                    for j in range(cols_count):
+                        cell = tbl.cell(0, j)
+                        cell.text = str(df.columns[j])
+                        for para in cell.text_frame.paragraphs:
+                            para.font.size = Pt(9)
+                            para.font.bold = True
+                    for i in range(min(len(df), rows_count - 1)):
+                        for j in range(cols_count):
+                            cell = tbl.cell(i + 1, j)
+                            val = df.iloc[i, j]
+                            try:
+                                if pd.isna(val):
+                                    cell.text = ""
+                                elif isinstance(val, (int, float)):
+                                    cell.text = f"{val:,.0f}" if float(val) == int(float(val)) else f"{val:,.1f}"
+                                else:
+                                    cell.text = str(val)
+                            except (ValueError, TypeError):
+                                cell.text = str(val)
+                            for para in cell.text_frame.paragraphs:
+                                para.font.size = Pt(8)
+                else:
+                    slide.shapes.add_picture(img, Emu(457200), Emu(685800), Emu(11277600), Emu(5486400))
+        elif has_table:
             df = section["df"]
             rows_count = min(len(df) + 1, 16)
             cols_count = min(len(df.columns), 6)
@@ -2581,47 +2630,66 @@ def _generate_pptx_report(property_name, date_label, sections):
     return buf.getvalue()
 
 def _generate_pdf_report(property_name, date_label, sections):
-    """Generate a simple PDF from report sections using basic HTML."""
-    html = f"""<html><head><style>
-    body {{ font-family: Arial; margin: 40px; color: #333; }}
-    h1 {{ color: #1F4E79; text-align: center; }}
-    h2 {{ color: #1F4E79; border-bottom: 1px solid #ddd; padding-bottom: 4px; }}
-    .subtitle {{ text-align: center; color: #888; margin-bottom: 30px; }}
-    table {{ border-collapse: collapse; width: 100%; margin: 10px 0 20px 0; font-size: 11px; }}
-    th {{ background: #1F4E79; color: white; padding: 6px 8px; text-align: left; }}
-    td {{ padding: 5px 8px; border-bottom: 1px solid #eee; }}
-    tr:nth-child(even) {{ background: #f9f9f9; }}
-    </style></head><body>
-    <h1>{property_name}</h1>
-    <p class="subtitle">Website Performance Report  |  {date_label}</p>
-    """
+    """Generate a real PDF with chart images above tables."""
+    import base64
+    import io as _io2
+    html_parts = [
+        "<html><head><style>",
+        "body { font-family: Arial; margin: 40px; color: #333; }",
+        "h1 { color: #1F4E79; text-align: center; }",
+        "h2 { color: #1F4E79; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 28px; }",
+        ".subtitle { text-align: center; color: #888; margin-bottom: 30px; }",
+        ".chart-img { width: 100%; max-width: 700px; display: block; margin: 10px auto 16px auto; }",
+        "table { border-collapse: collapse; width: 100%; margin: 8px 0 20px 0; font-size: 10px; }",
+        "th { background: #1F4E79; color: white; padding: 5px 7px; text-align: left; }",
+        "td { padding: 4px 7px; border-bottom: 1px solid #eee; }",
+        "tr:nth-child(even) { background: #f9f9f9; }",
+        "</style></head><body>",
+        "<h1>" + property_name + "</h1>",
+        '<p class="subtitle">Website Performance Report | ' + date_label + '</p>',
+    ]
     for section in sections:
-        html += f"<h2>{section['title']}</h2>"
+        html_parts.append("<h2>" + section["title"] + "</h2>")
+        if "fig" in section and section["fig"] is not None:
+            png = _fig_to_png(section["fig"])
+            if png:
+                b64 = base64.b64encode(png).decode("utf-8")
+                html_parts.append('<img class="chart-img" src="data:image/png;base64,' + b64 + '" />')
         if "df" in section and section["df"] is not None and not section["df"].empty:
             df = section["df"]
-            html += "<table><tr>"
+            html_parts.append("<table><tr>")
             for col in df.columns:
-                html += f"<th>{col}</th>"
-            html += "</tr>"
+                html_parts.append("<th>" + str(col) + "</th>")
+            html_parts.append("</tr>")
             for _, row in df.iterrows():
-                html += "<tr>"
+                html_parts.append("<tr>")
                 for col in df.columns:
                     val = row[col]
                     try:
                         if pd.isna(val):
-                            html += "<td></td>"
+                            html_parts.append("<td></td>")
                         elif isinstance(val, (int, float)):
-                            html += f"<td>{val:,.0f}</td>" if float(val) == int(float(val)) else f"<td>{val:,.1f}</td>"
+                            html_parts.append("<td>" + (f"{val:,.0f}" if float(val) == int(float(val)) else f"{val:,.1f}") + "</td>")
                         else:
-                            html += f"<td>{val}</td>"
+                            html_parts.append("<td>" + str(val) + "</td>")
                     except (ValueError, TypeError):
-                        html += f"<td>{val}</td>"
-                html += "</tr>"
-            html += "</table>"
+                        html_parts.append("<td>" + str(val) + "</td>")
+                html_parts.append("</tr>")
+            html_parts.append("</table>")
         if "summary" in section:
-            html += f"<p>{section['summary']}</p>"
-    html += "</body></html>"
-    return html.encode("utf-8")
+            html_parts.append("<p>" + section["summary"] + "</p>")
+    html_parts.append("</body></html>")
+    html_str = "\n".join(html_parts)
+    try:
+        from xhtml2pdf import pisa
+        pdf_buf = _io2.BytesIO()
+        status = pisa.CreatePDF(_io2.StringIO(html_str), dest=pdf_buf)
+        if not status.err:
+            pdf_buf.seek(0)
+            return pdf_buf.getvalue()
+    except Exception:
+        pass
+    return html_str.encode("utf-8")
 
 # ════════════════════════════════════════════════════════════════════
 # REPORT PAGE
@@ -2856,31 +2924,31 @@ if _page == "Report":
         _rpt_yoy_table["Month"] = _rpt_yoy_table["month"].apply(lambda m: MONTH_LABELS[int(m)-1])
         _rpt_yoy_pivot = _rpt_yoy_table.pivot_table(index="Month", columns="year", values="sessions", aggfunc="sum").reset_index()
         _rpt_yoy_pivot.columns = [str(c) for c in _rpt_yoy_pivot.columns]
-        _report_sections.append({"title": "Overall Traffic — Year-on-Year", "df": _rpt_yoy_pivot})
+        _report_sections.append({"title": "Overall Traffic — Year-on-Year", "df": _rpt_yoy_pivot, "fig": _fig_rpt_all})
     if _chk_organic and "_rpt_org" in dir() and not _rpt_org.empty:
         _rpt_org_table = _rpt_org.copy()
         _rpt_org_table["Month"] = _rpt_org_table["month"].apply(lambda m: MONTH_LABELS[int(m)-1])
         _rpt_org_pivot = _rpt_org_table.pivot_table(index="Month", columns="year", values="sessions", aggfunc="sum").reset_index()
         _rpt_org_pivot.columns = [str(c) for c in _rpt_org_pivot.columns]
-        _report_sections.append({"title": "Organic Traffic — Year-on-Year", "df": _rpt_org_pivot})
+        _report_sections.append({"title": "Organic Traffic — Year-on-Year", "df": _rpt_org_pivot, "fig": _fig_rpt_org})
     if _chk_engage and "_rpt_eng" in dir() and not _rpt_eng.empty:
-        _report_sections.append({"title": "Engagement Rate — Past 12 Months (Organic)", "df": _rpt_eng[["label", "engagement_rate"]].rename(columns={"label": "Month", "engagement_rate": "Engagement Rate (%)"})})
+        _report_sections.append({"title": "Engagement Rate — Past 12 Months (Organic)", "df": _rpt_eng[["label", "engagement_rate"]].rename(columns={"label": "Month", "engagement_rate": "Engagement Rate (%)"}), "fig": _fig_rpt_eng})
     if _chk_cities and "_rpt_cities" in dir() and not _rpt_cities.empty:
-        _report_sections.append({"title": "Top 10 Cities — Past 6 Months", "df": _rpt_cities})
+        _report_sections.append({"title": "Top 10 Cities — Past 6 Months", "df": _rpt_cities, "fig": _fig_rpt_c})
     if _chk_countries and "_rpt_countries" in dir() and not _rpt_countries.empty:
-        _report_sections.append({"title": "Top 10 Countries — Past 6 Months", "df": _rpt_countries})
+        _report_sections.append({"title": "Top 10 Countries — Past 6 Months", "df": _rpt_countries, "fig": _fig_rpt_co})
     if _chk_device and "_rpt_dev" in dir() and not _rpt_dev.empty:
-        _report_sections.append({"title": "Device Categories — Past 6 Months", "df": _rpt_dev})
+        _report_sections.append({"title": "Device Categories — Past 6 Months", "df": _rpt_dev, "fig": _fig_rpt_dev})
     if _chk_keywords and "_rpt_kw" in dir() and not _rpt_kw.empty:
-        _report_sections.append({"title": "Top 10 Keywords", "df": _rpt_kw.head(10)})
+        _report_sections.append({"title": "Top 10 Keywords", "df": _rpt_kw.head(10), "fig": None})
     if _chk_clicks and "_all_gsc_agg" in dir() and not _all_gsc_agg.empty:
         _clicks_table = _all_gsc_agg.copy()
         _clicks_table["Month"] = _clicks_table["month"].astype(str)
-        _report_sections.append({"title": "Clicks — Year-on-Year", "df": _clicks_table[["Month", "clicks"]].rename(columns={"clicks": "Clicks"})})
+        _report_sections.append({"title": "Clicks — Year-on-Year", "df": _clicks_table[["Month", "clicks"]].rename(columns={"clicks": "Clicks"}), "fig": _fig_rpt_clicks})
     if _chk_impr and "_all_gsc_agg2" in dir() and not _all_gsc_agg2.empty:
         _impr_table = _all_gsc_agg2.copy()
         _impr_table["Month"] = _impr_table["month"].astype(str)
-        _report_sections.append({"title": "Impressions — Year-on-Year", "df": _impr_table[["Month", "impressions"]].rename(columns={"impressions": "Impressions"})})
+        _report_sections.append({"title": "Impressions — Year-on-Year", "df": _impr_table[["Month", "impressions"]].rename(columns={"impressions": "Impressions"}), "fig": _fig_rpt_impr})
 
     _date_label = f"{start_date.strftime('%b %d')} \u2013 {end_date.strftime('%b %d, %Y')}"
     _prop_name = PROPERTIES[selected_label]["name"]
@@ -2909,9 +2977,9 @@ if _page == "Report":
         with _dlc4:
             _pdf_bytes = _generate_pdf_report(_prop_name, _date_label, _report_sections)
             st.download_button(
-                "\U0001f5d1 PDF (HTML)", data=_pdf_bytes,
-                file_name=f"{_prop_name}_report_{date.today()}.html",
-                mime="text/html",
+                "\U0001f5d1 PDF", data=_pdf_bytes,
+                file_name=f"{_prop_name}_report_{date.today()}.pdf",
+                mime="application/pdf",
                 key="dl_pdf", use_container_width=True,
             )
 
