@@ -2558,7 +2558,7 @@ def _generate_pptx_report(property_name, date_label, sections):
         p.font.size = Pt(24)
         p.font.bold = True
         p.font.color.rgb = RGBColor(0x1F, 0x4E, 0x79)
-      has_chart = "fig" in section and section["fig"] is not None
+        has_chart = "fig" in section and section["fig"] is not None
         has_table = "df" in section and section["df"] is not None and not section["df"].empty
         if has_chart:
             png = _fig_to_png(section["fig"])
