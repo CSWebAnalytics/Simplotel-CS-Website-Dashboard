@@ -14,4 +14,4 @@ pypdf
 python-docx
 python-pptx
 kaleido
-xhtml2pdf
+reportlab>=4.0.0
