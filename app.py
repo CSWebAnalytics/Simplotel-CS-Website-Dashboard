@@ -2463,8 +2463,10 @@ load = st.sidebar.button("Load / Refresh Data", type="primary", use_container_wi
 def _fig_to_png(fig):
     """Render a Plotly figure to PNG bytes using kaleido. Returns None on failure."""
     try:
-        return fig.to_image(format="png", width=1000, height=460, scale=2)
-    except Exception:
+        return fig.to_image(format="png", width=1000, height=460, scale=2, engine="kaleido")
+    except Exception as _e:
+        import streamlit as _st
+        _st.warning(f"Chart export failed: {str(_e)[:300]}")
         return None
 
 def _generate_word_report(property_name, date_label, sections):
